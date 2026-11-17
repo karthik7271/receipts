@@ -1,0 +1,4 @@
+# tinyshop settings
+tax_rate: 0.08
+currency: USD
+free_shipping_over: 50
