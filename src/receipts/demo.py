@@ -6,6 +6,7 @@ It drives the same functions the MCP tools call, on a small sample repo
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -154,6 +155,7 @@ def run(workdir: Path, *, fast: bool = False, keep: bool = False) -> Path:
     n.step("Next session starts (SessionStart hook runs `receipts sync`). Relate propagates the change:")
     with Store(store_path) as s:
         rep = sync(s, repo)
+        before_repair = to_cypher(s)
     n.out(sync_summary(rep, p))
     n.say("\n  Read that again: Relate did four different things with one graph:")
     n.say("   • M1, M6: the cited code changed → stale.            M3: the quoted config line is gone → stale.")
@@ -200,13 +202,23 @@ def run(workdir: Path, *, fast: bool = False, keep: bool = False) -> Path:
         st = memory.status(s)
     n.out("\n" + status_block(st, p))
 
-    with Store(store_path) as s:
-        (repo / ".receipts" / "graph.cypher").write_text(to_cypher(s))
+    site = repo / ".receipts" / "site"
+    site.mkdir(parents=True, exist_ok=True)
+    with Store(store_path, read_only=True) as s:
+        (site / "after-repair.cypher").write_text(to_cypher(s))
+    (site / "before-repair.cypher").write_text(before_repair)
+    (site / "index.html").write_bytes((resources.files("receipts") / "viewer" / "index.html").read_bytes())
+    (site / "datasets.json").write_text(json.dumps([
+        {"file": "before-repair.cypher", "label": "Demo: after the refactor (before repair)"},
+        {"file": "after-repair.cypher", "label": "Demo: after the agent repaired its memory"},
+    ], indent=1))
 
     n.title("Done")
-    print(f"  Memory store (a Relate .rl file): {store_path}")
-    print(f"  Try:  receipts --repo {repo} status")
-    print(f"        receipts --repo {repo} recall \"tax\"")
-    print(f"        receipts --repo {repo} why M5        # the graph behind one memory")
-    print(f"        receipts --repo {repo} ui            # explore the graph in your browser (Relate WASM)")
+    rel = os.path.relpath(repo)
+    where = rel if not rel.startswith("..") else str(repo)
+    print(f"  Memory store (a Relate .rl file): {os.path.join(where, '.receipts', 'memory.rl')}")
+    print(f"  Try:  receipts --repo {where} status")
+    print(f"        receipts --repo {where} recall \"tax\"")
+    print(f"        receipts --repo {where} why M12      # the graph behind one memory")
+    print(f"        receipts --repo {where} ui           # explore the graph in your browser (Relate WASM)")
     return store_path

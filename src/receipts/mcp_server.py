@@ -128,8 +128,13 @@ class Server:
     def call(self, name: str, args: dict[str, Any]) -> str:
         with Store(self.store_path) as s:
             if name == "recall":
-                facts = memory.recall(s, self.repo, args.get("query", ""), target=args.get("target", ""),
-                                      limit=int(args.get("limit") or 8))
+                # Agents improvise argument names; accept the obvious ones.
+                query = next((str(args[k]) for k in ("query", "question", "q", "text", "topic") if args.get(k)), "")
+                target = next((str(args[k]) for k in ("target", "path", "symbol", "file") if args.get(k)), "")
+                if not query and not target:
+                    return status_block(memory.status(s), self.p) + \
+                        "\n\nPass `query` (a question) and/or `target` (a file or symbol) to search."
+                facts = memory.recall(s, self.repo, query, target=target, limit=int(args.get("limit") or 8))
                 if not facts:
                     return ("No memories match. If you work this out, `remember` it with receipts so the next "
                             "session doesn't have to.")

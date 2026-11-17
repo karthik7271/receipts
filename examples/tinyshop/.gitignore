@@ -1,0 +1,3 @@
+.receipts/*.lock
+.receipts/hook.log
+__pycache__/

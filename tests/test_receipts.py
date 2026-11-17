@@ -192,6 +192,61 @@ def test_hooks_tell_the_agent_what_it_just_broke(shop):
     assert "M3" in start and "recall" in start
 
 
+def test_recall_accepts_improvised_argument_names(shop):
+    repo, store = shop
+    remember_day1(repo, store)
+    srv = Server(repo, store)
+    assert "M3" in srv.call("recall", {"question": "tax"})
+    assert "Pass `query`" in srv.call("recall", {})
+
+
+class FakeClaude:
+    """Stands in for anthropic.Anthropic(): returns canned verdicts per memory."""
+
+    def __init__(self, verdicts):
+        self.verdicts, self.seen = verdicts, []
+        self.beta = self
+        self.messages = self
+
+    def create(self, **kw):
+        case = json.loads(kw["messages"][0]["content"].split("\n\n", 1)[1])
+        self.seen.append(case)
+        assert kw["output_config"]["format"]["type"] == "json_schema"
+        v = self.verdicts[case["memory_id"]]
+
+        class Block:
+            type, text = "text", json.dumps({"reason": "test", "revised_text": "", "new_receipts": [], **v})
+
+        class Resp:
+            stop_reason, content = "end_turn", [Block()]
+        return Resp()
+
+
+def test_heal_applies_verdicts_parents_first(shop):
+    from receipts.heal import heal
+    repo, store = shop
+    remember_day1(repo, store)
+    apply_v2(repo)
+    fake = FakeClaude({
+        "M1": {"verdict": "revise", "revised_text": "Money stores a Decimal amount quantized to cents."},
+        "M2": {"verdict": "reaffirm"},
+        "M3": {"verdict": "revise", "revised_text": "Sales tax is 8.25%.",
+               "new_receipts": [{"kind": "quote", "target": "config/settings.yaml", "quote": "tax_rate: 0.0825"}]},
+        "M4": {"verdict": "reaffirm"},
+        "M5": {"verdict": "revise", "revised_text": "$100 with 10% off totals $97.43."},
+        "M6": {"verdict": "retract"},
+    })
+    results = heal(repo, store, client=fake)
+    order = [c["memory_id"] for c in fake.seen]
+    assert order.index("M1") < order.index("M4") and order.index("M3") < order.index("M5")
+    m3_case = next(c for c in fake.seen if c["memory_id"] == "M3")
+    assert m3_case["receipts"][0]["quote_still_present"] is False
+    st = statuses(store)
+    assert st["M6"] == "retracted"
+    assert all(v in ("fresh", "superseded", "retracted") for v in st.values()), st
+    assert {r["outcome"] for r in results} >= {"revised", "reaffirmed", "retracted"}
+
+
 def test_export_replays_into_relate(shop):
     import relate
     repo, store = shop

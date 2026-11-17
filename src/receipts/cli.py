@@ -277,7 +277,7 @@ def cmd_ui(a, p):
 
 def cmd_heal(a, p):
     from .heal import heal
-    heal(a.repo, a.store, model=a.model, apply=not a.dry_run, painter=p, only=a.ids or None)
+    heal(a.repo, a.store, model=a.model, apply=not a.dry_run, painter=p, only=a.ids or None, effort=a.effort)
 
 
 # --------------------------------------------------------------------------- #
@@ -371,7 +371,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_ui)
     s = sub.add_parser("heal", help="let Claude re-check stale/suspect memories against the code (needs ANTHROPIC_API_KEY)")
     s.add_argument("ids", nargs="*")
-    s.add_argument("--model", default=os.environ.get("RECEIPTS_MODEL", "claude-sonnet-5-5"))
+    s.add_argument("--model", default=os.environ.get("RECEIPTS_MODEL", "claude-opus-5-5"))
+    s.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     s.add_argument("--dry-run", action="store_true", help="show verdicts without applying them")
     s.set_defaults(fn=cmd_heal)
     return ap

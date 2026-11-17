@@ -1,0 +1,3 @@
+[{"file": "before-repair.cypher", "label": "Demo: after the refactor (before repair)"},
+ {"file": "after-repair.cypher", "label": "Demo: after the agent repaired its memory"},
+ {"file": "live-session.cypher", "label": "Live: memories written by Claude Code via MCP"}]
