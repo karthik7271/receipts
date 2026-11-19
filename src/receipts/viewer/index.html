@@ -7,153 +7,302 @@
 <meta name="description" content="Agent memory with receipts: every memory cites code, and Relate (running in this tab as WebAssembly) decides what is still true.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
 <style>
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6673; --line: #e3e6eb; --soft: #eef0f4;
-  --fresh: #1f9d55; --stale: #d64545; --suspect: #c98a04; --superseded: #8a93a0; --retracted: #8a93a0;
-  --symbol: #3b6fd8; --file: #7a57d1; --source: #0f8b8d; --accent: #2a5bd7; --code-bg: #f3f4f7;
-  --add: #1f9d55; --del: #d64545;
+  --paper: #fbfcfa;      /* list, header, receipt slip */
+  --ledger: #eff4ec;     /* graph canvas */
+  --desk: #e5ebe2;       /* behind the slip */
+  --grid: rgba(46, 125, 79, 0.08);
+  --grid-major: rgba(46, 125, 79, 0.15);
+  --ink: #1e2a2b;
+  --graphite: #5f6b66;
+  --faint: #8a948f;
+  --rule: #d8e0d4;
+  --rule-strong: #c3cdbf;
+  --code-bg: #f3f6f1;
+  --fresh: #2e7d4f;
+  --stale: #b42318;
+  --suspect: #a96a00;
+  --superseded: #7d8782;
+  --retracted: #7d8782;
+  --carbon: #2f4a9e;
+  --code: #55636f;
+  --select: rgba(47, 74, 158, 0.07);
+  --shadow: 0 1px 0 rgba(30, 42, 43, 0.05), 0 14px 30px -18px rgba(30, 42, 43, 0.45);
+  --stamp-blend: multiply;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1216; --panel: #161a20; --ink: #e8ebf0; --muted: #98a2b1; --line: #262c35; --soft: #1d222a;
-    --fresh: #3ccf7c; --stale: #ff6b6b; --suspect: #f2b632; --superseded: #6b7480; --retracted: #6b7480;
-    --symbol: #6f9bff; --file: #a78bfa; --source: #2dd4bf; --accent: #6f9bff; --code-bg: #12161b;
-    --add: #3ccf7c; --del: #ff6b6b; color-scheme: dark;
+    --paper: #18201e; --ledger: #121917; --desk: #0e1412;
+    --grid: rgba(120, 190, 150, 0.05); --grid-major: rgba(120, 190, 150, 0.10);
+    --ink: #e3eae5; --graphite: #9ba7a1; --faint: #6f7c76; --rule: #26302d; --rule-strong: #33403c;
+    --code-bg: #111816; --fresh: #5fbf8a; --stale: #f07167; --suspect: #e3a640; --superseded: #8b9892;
+    --retracted: #8b9892; --carbon: #92a9f2; --code: #8a99a6; --select: rgba(146, 169, 242, 0.09);
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 18px 36px -20px rgba(0, 0, 0, 0.9); --stamp-blend: normal;
+    color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1216; --panel: #161a20; --ink: #e8ebf0; --muted: #98a2b1; --line: #262c35; --soft: #1d222a;
-  --fresh: #3ccf7c; --stale: #ff6b6b; --suspect: #f2b632; --superseded: #6b7480; --retracted: #6b7480;
-  --symbol: #6f9bff; --file: #a78bfa; --source: #2dd4bf; --accent: #6f9bff; --code-bg: #12161b;
-  --add: #3ccf7c; --del: #ff6b6b; color-scheme: dark;
+  --paper: #18201e; --ledger: #121917; --desk: #0e1412;
+  --grid: rgba(120, 190, 150, 0.05); --grid-major: rgba(120, 190, 150, 0.10);
+  --ink: #e3eae5; --graphite: #9ba7a1; --faint: #6f7c76; --rule: #26302d; --rule-strong: #33403c;
+  --code-bg: #111816; --fresh: #5fbf8a; --stale: #f07167; --suspect: #e3a640; --superseded: #8b9892;
+  --retracted: #8b9892; --carbon: #92a9f2; --code: #8a99a6; --select: rgba(146, 169, 242, 0.09);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 18px 36px -20px rgba(0, 0, 0, 0.9); --stamp-blend: normal;
+  color-scheme: dark;
 }
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--ink); font: 14px/1.45 Inter, system-ui, -apple-system, Segoe UI, sans-serif; }
-code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.brand h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-.brand span { color: var(--muted); font-size: 13px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; align-items: center; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); font-size: 12.5px; cursor: pointer; user-select: none; color: var(--ink); }
-.chip[aria-pressed="false"] { opacity: .45; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
-.engine { color: var(--muted); font-size: 12px; }
-button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
-button.ghost:hover { background: var(--soft); }
-main { display: grid; grid-template-columns: 340px minmax(0, 1fr) 400px; height: calc(100vh - 62px); min-height: 520px; }
-aside, section { min-width: 0; min-height: 0; }
-.list { border-right: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
-.list .search { padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.list input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
-.items { overflow: auto; flex: 1; }
-.item { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
-.item:hover { background: var(--soft); }
-.item.sel { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
-.item .top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-.item .id { font-weight: 600; color: var(--ink); }
-.item .txt { margin-top: 3px; }
-.item.inactive .txt { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent); }
-.badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; color: #fff; text-transform: uppercase; letter-spacing: .03em; }
-.graph { position: relative; }
-#cy { position: absolute; inset: 0; }
-.legend { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; color: var(--muted); display: grid; grid-template-columns: auto auto; gap: 3px 14px; }
-.legend i { display: inline-block; width: 18px; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
-.toggles { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.detail { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); }
-.tabs button { flex: 1; background: none; border: 0; padding: 11px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
-.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
-.pane { overflow: auto; flex: 1; padding: 16px; }
-.pane h2 { font-size: 16px; margin: 6px 0 4px; line-height: 1.35; }
-.pane h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
-.reason { color: var(--suspect); margin: 4px 0; }
-.receipt { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
-.receipt .head { display: flex; gap: 8px; align-items: baseline; }
-.receipt .ok { color: var(--fresh); font-weight: 700; }
-.receipt .bad { color: var(--stale); font-weight: 700; }
-.receipt .ext { color: var(--source); font-weight: 700; }
-.receipt small { color: var(--muted); display: block; margin-top: 2px; }
-pre.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow: auto; max-height: 220px; margin: 6px 0 0; white-space: pre; }
-.link { color: var(--accent); cursor: pointer; font-weight: 600; }
-.muted { color: var(--muted); }
-.hist { font-size: 12.5px; color: var(--muted); margin: 3px 0; }
-textarea { width: 100%; min-height: 110px; resize: vertical; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); color: var(--ink); padding: 10px; }
-.samples { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-.samples button { font-size: 12px; }
-.run { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
-table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 12.5px; }
-th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 6px 6px; vertical-align: top; }
-th { color: var(--muted); font-weight: 600; }
-td { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; word-break: break-word; }
-.err { color: var(--stale); white-space: pre-wrap; }
-.empty { color: var(--muted); padding: 24px; text-align: center; }
-#loading { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 10; }
-#loading div { text-align: center; color: var(--muted); }
-#loading strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 6px; }
-@media (max-width: 1100px) {
-  main { grid-template-columns: 300px minmax(0, 1fr); height: auto; }
-  .detail { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); min-height: 420px; }
-  .graph { min-height: 520px; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 400 14px/1.5 "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 }
-@media (max-width: 720px) {
-  header { padding: 12px 16px; }
-  .chips { margin-left: 0; }
+.mono, code, pre, textarea { font-family: "Spline Sans Mono", ui-monospace, Menlo, monospace; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--carbon); outline-offset: 2px; border-radius: 3px; }
+[hidden] { display: none !important; }
+
+/* ---------- header ---------- */
+.top {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 28px;
+  padding: 14px 24px; border-bottom: 1px solid var(--rule); background: var(--paper);
+}
+.brand { display: flex; align-items: baseline; gap: 12px; }
+.brand h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
+.brand p { margin: 0; color: var(--graphite); font-size: 14px; }
+.dataset { position: relative; }
+.dataset select {
+  appearance: none; background: transparent; border: 1px solid var(--rule-strong); border-radius: 6px;
+  padding: 5px 30px 5px 10px; font-size: 13.5px; font-weight: 500; cursor: pointer; max-width: 340px;
+}
+.dataset::after {
+  content: ""; position: absolute; right: 11px; top: 50%; width: 6px; height: 6px; margin-top: -5px;
+  border-right: 1.5px solid var(--graphite); border-bottom: 1.5px solid var(--graphite); transform: rotate(45deg);
+  pointer-events: none;
+}
+.tally { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.tally button {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: 6px;
+  border: 1px solid transparent; background: none; cursor: pointer; font-size: 13.5px; color: var(--graphite);
+}
+.tally button:hover { border-color: var(--rule-strong); }
+.tally button[aria-pressed="true"] { color: var(--ink); }
+.tally button[aria-pressed="false"] { opacity: 0.5; }
+.tally b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.tally .m { font-weight: 700; }
+.theme { border: 1px solid var(--rule-strong); background: none; border-radius: 6px; width: 32px; height: 30px; cursor: pointer; }
+
+/* ---------- layout ---------- */
+main { display: grid; grid-template-columns: 340px minmax(0, 1fr) 420px; height: calc(100vh - 61px); min-height: 560px; }
+
+/* ---------- ledger list ---------- */
+.list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rule); background: var(--paper); }
+.find { padding: 12px 16px; border-bottom: 1px solid var(--rule); }
+.find input {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--paper);
+  font-size: 13.5px;
+}
+.find input::placeholder { color: var(--faint); }
+.rows { overflow: auto; flex: 1; }
+.row {
+  display: grid; grid-template-columns: 14px 30px minmax(0, 1fr); column-gap: 8px; width: 100%;
+  padding: 11px 16px 12px; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left;
+  cursor: pointer; align-items: baseline;
+}
+.row:hover { background: var(--select); }
+.row[aria-current="true"] { background: var(--select); box-shadow: inset 3px 0 0 var(--carbon); }
+.row .m { font-weight: 700; font-size: 13px; text-align: center; }
+.row .rid { font: 500 12.5px "Spline Sans Mono", monospace; color: var(--graphite); }
+.row .claim { font-size: 14px; line-height: 1.42; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.row .kind { grid-column: 3; color: var(--faint); font-size: 12.5px; margin-top: 2px; }
+.row.inactive .claim { color: var(--graphite); }
+.empty { padding: 28px 20px; color: var(--graphite); }
+
+/* ---------- graph paper ---------- */
+.paper {
+  position: relative; min-height: 0; overflow: hidden; background-color: var(--ledger);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+}
+#cy { position: absolute; inset: 0; }
+.tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tools button {
+  background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 4px 10px;
+  font-size: 13px; cursor: pointer; color: var(--graphite);
+}
+.tools button[aria-pressed="true"] { color: var(--ink); border-color: var(--graphite); }
+.key {
+  position: absolute; left: 14px; bottom: 14px; display: grid; grid-template-columns: auto auto; gap: 4px 18px;
+  padding: 10px 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
+  font-size: 12.5px; color: var(--graphite);
+}
+.key span { display: flex; align-items: center; gap: 7px; }
+.key i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; display: inline-block; }
+.key s { width: 18px; border-top: 1.5px solid; display: inline-block; text-decoration: none; }
+.key em { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--code); }
+.engine { position: absolute; right: 16px; bottom: 14px; max-width: 46%; text-align: right; font-size: 12.5px; color: var(--graphite); }
+
+/* ---------- desk + receipt slip ---------- */
+.desk { display: flex; flex-direction: column; min-height: 0; background: var(--desk); border-left: 1px solid var(--rule); }
+.tabs { display: flex; gap: 22px; padding: 0 24px; border-bottom: 1px solid var(--rule-strong); }
+.tabs button {
+  background: none; border: 0; padding: 13px 0 11px; cursor: pointer; font-weight: 600; color: var(--graphite);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--carbon); }
+.pane { overflow: auto; flex: 1; padding: 22px 22px 40px; }
+
+.slip {
+  position: relative; background: var(--paper); box-shadow: var(--shadow); padding: 20px 20px 26px;
+  margin-bottom: 14px;
+}
+.slip::after {   /* torn edge */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -9px; height: 10px;
+  background:
+    linear-gradient(135deg, var(--paper) 50%, transparent 50%) 0 0 / 12px 10px repeat-x,
+    linear-gradient(-135deg, var(--paper) 50%, transparent 50%) 0 0 / 12px 10px repeat-x;
+  filter: drop-shadow(0 2px 1px rgba(30, 42, 43, 0.06));
+}
+.slip-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 12.5px "Spline Sans Mono", monospace; color: var(--graphite); }
+.claim-big { margin: 10px 0 0; font-size: 19px; line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; max-width: 34ch; }
+.claim-big.long { font-size: 16px; line-height: 1.45; font-weight: 500; letter-spacing: 0; max-width: 46ch; }
+.stamp-wrap { display: flex; justify-content: flex-end; margin: 6px 4px -4px 0; }
+.stamp {
+  display: inline-block; font: 700 14px/1 "Instrument Sans", sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+  padding: 7px 11px 6px 13px; border: 2.5px solid currentColor; border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--paper), inset 0 0 0 3px currentColor;
+  transform: rotate(-6deg); opacity: 0.86; mix-blend-mode: var(--stamp-blend); filter: url(#ink);
+  animation: thunk 190ms cubic-bezier(.2, .9, .25, 1.25) both;
+}
+@keyframes thunk {
+  from { transform: rotate(-6deg) scale(1.45); opacity: 0; }
+  70% { opacity: 0.92; }
+  to { transform: rotate(-6deg) scale(1); opacity: 0.86; }
+}
+@media (prefers-reduced-motion: reduce) { .stamp { animation: none; } }
+.perf { border: 0; border-top: 1.5px dashed var(--rule-strong); margin: 16px 0 12px; }
+.slip h3 { margin: 0 0 8px; font: 600 12.5px "Spline Sans Mono", monospace; color: var(--graphite); }
+.reason { margin: 0 0 4px; color: var(--suspect); font-size: 14px; }
+.reason.stale { color: var(--stale); }
+.broke { margin: 6px 0 0; color: var(--graphite); font-size: 13px; }
+.item { font: 400 12.5px/1.55 "Spline Sans Mono", monospace; margin: 0 0 12px; }
+.item:last-child { margin-bottom: 0; }
+.item .line { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; align-items: baseline; }
+.item .ok { color: var(--fresh); font-weight: 600; }
+.item .bad { color: var(--stale); font-weight: 600; }
+.item .ext { color: var(--carbon); font-weight: 600; }
+.item .tgt { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.item .where { display: block; color: var(--faint); font-weight: 400; overflow-wrap: anywhere; }
+.item .sub { margin: 3px 0 0 22px; color: var(--graphite); font-size: 12px; overflow-wrap: anywhere; }
+pre.code {
+  margin: 8px 0 0 22px; padding: 9px 11px; background: var(--code-bg); border-left: 2px solid var(--rule-strong);
+  font-size: 12px; line-height: 1.55; overflow: auto; max-height: 260px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+pre.code .add { color: var(--fresh); } pre.code .del { color: var(--stale); } pre.code .ctx { color: var(--graphite); }
+.link { display: grid; grid-template-columns: 34px 14px minmax(0, 1fr); gap: 6px; padding: 5px 0; background: none; border: 0; width: 100%; text-align: left; cursor: pointer; font-size: 13.5px; }
+.link .rid { font: 500 12.5px "Spline Sans Mono", monospace; color: var(--carbon); }
+.link:hover .t { text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
+.hist { font-size: 13px; color: var(--graphite); margin: 0 0 4px; }
+.hint { color: var(--graphite); font-size: 14px; margin: 4px 2px 0; max-width: 40ch; }
+
+/* ---------- cypher ---------- */
+.ask p { margin: 0 0 12px; color: var(--graphite); max-width: 46ch; }
+.samples { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 0 0 14px; }
+.samples button { background: none; border: 0; padding: 3px 0; color: var(--carbon); cursor: pointer; font-size: 13.5px; text-align: left; }
+.samples button:hover { text-decoration: underline; text-underline-offset: 3px; }
+textarea {
+  width: 100%; min-height: 128px; resize: vertical; padding: 11px 12px; border: 1px solid var(--rule-strong);
+  border-radius: 6px; background: var(--paper); font-size: 12.5px; line-height: 1.55;
+}
+.runbar { display: flex; align-items: center; gap: 12px; margin: 10px 0 4px; }
+.run { background: var(--ink); color: var(--paper); border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; }
+.meta { color: var(--graphite); font-size: 13px; }
+table { border-collapse: collapse; width: 100%; margin-top: 12px; background: var(--paper); }
+th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; font-size: 12.5px; color: var(--graphite); }
+td { font: 12px/1.5 "Spline Sans Mono", monospace; word-break: break-word; }
+.err { color: var(--stale); white-space: pre-wrap; margin-top: 10px; }
+
+#loading { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--paper); }
+#loading div { max-width: 36ch; }
+#loading strong { display: block; font-size: 17px; margin-bottom: 4px; }
+#loading span { color: var(--graphite); }
+
+@media (max-width: 1180px) {
+  main { grid-template-columns: 300px minmax(0, 1fr); height: auto; }
+  .paper { min-height: 560px; }
+  .desk { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--rule); min-height: 480px; }
+}
+@media (max-width: 760px) {
+  .top { padding: 12px 16px; }
+  .brand p { display: none; }
+  .tally { margin-left: 0; }
   main { grid-template-columns: minmax(0, 1fr); }
-  .list { border-right: 0; max-height: 360px; }
-  .graph { min-height: 420px; border-top: 1px solid var(--line); }
-  .legend { display: none; }
+  .list { border-right: 0; max-height: 380px; }
+  .paper { min-height: 440px; border-top: 1px solid var(--rule); }
+  .key, .engine { display: none; }
+  .pane { padding: 18px 16px 36px; }
 }
 </style>
 </head>
 <body>
-<div id="loading"><div><strong>Starting Relate in your browser…</strong>loading the WebAssembly engine and replaying the memory graph</div></div>
-<header>
-  <div class="brand"><h1>Receipts</h1><span>agent memory that knows when it's wrong</span></div>
-  <select id="dataset" class="ghost" hidden aria-label="Dataset" style="background:var(--soft);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font:inherit;font-size:12.5px"></select>
-  <div class="chips" id="chips"></div>
-  <span class="engine" id="engine"></span>
-  <button class="ghost" id="theme" title="Toggle light/dark">◐</button>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="ink"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="4"/><feDisplacementMap in="SourceGraphic" scale="1.6"/></filter>
+</svg>
+<div id="loading"><div><strong>Starting Relate in this tab</strong><span>Loading the WebAssembly engine and replaying the memory graph.</span></div></div>
+
+<header class="top">
+  <div class="brand"><h1>Receipts</h1><p>Agent memory that knows when it's wrong</p></div>
+  <label class="dataset" hidden id="dataset-wrap"><span class="sr" hidden>Dataset</span><select id="dataset" aria-label="Dataset"></select></label>
+  <div class="tally" id="tally" role="group" aria-label="Filter by status"></div>
+  <button class="theme" id="theme" aria-label="Switch light or dark">◐</button>
 </header>
+
 <main>
-  <aside class="list">
-    <div class="search"><input id="filter" type="search" placeholder="Filter memories…" aria-label="Filter memories"></div>
-    <div class="items" id="items"></div>
+  <aside class="list" aria-label="Memories">
+    <div class="find"><input id="filter" type="search" placeholder="Search memories" aria-label="Search memories"></div>
+    <div class="rows" id="rows" role="listbox" aria-label="Memories"></div>
   </aside>
-  <section class="graph">
-    <div id="cy" aria-label="Memory graph"></div>
-    <div class="toggles">
-      <button class="ghost" id="tg-old" aria-pressed="false">show history</button>
-      <button class="ghost" id="tg-calls" aria-pressed="true">call graph</button>
-      <button class="ghost" id="tg-fit">fit</button>
+
+  <section class="paper" aria-label="Memory graph">
+    <div id="cy"></div>
+    <div class="tools">
+      <button id="tg-old" aria-pressed="false">Show replaced memories</button>
+      <button id="tg-calls" aria-pressed="true">Show calls</button>
+      <button id="tg-fit">Fit</button>
     </div>
-    <div class="legend">
-      <span><span class="dot" style="background:var(--fresh)"></span> fresh</span><span><i style="border-color:var(--muted)"></i>cites</span>
-      <span><span class="dot" style="background:var(--stale)"></span> stale</span><span><i style="border-color:var(--accent);border-top-style:dashed"></i>builds on</span>
-      <span><span class="dot" style="background:var(--suspect)"></span> suspect</span><span><i style="border-color:var(--symbol);border-top-style:dotted"></i>calls</span>
-      <span><span class="dot" style="background:var(--symbol)"></span> code</span><span><i style="border-color:var(--superseded);border-top-style:dotted"></i>supersedes</span>
+    <div class="key" aria-hidden="true">
+      <span><i style="border-color:var(--fresh)"></i>fresh</span><span><s style="border-color:var(--graphite)"></s>cites</span>
+      <span><i style="border-color:var(--stale)"></i>stale</span><span><s style="border-color:var(--carbon);border-top-style:dashed"></s>builds on</span>
+      <span><i style="border-color:var(--suspect)"></i>suspect</span><span><s style="border-color:var(--code);border-top-style:dotted"></s>calls</span>
+      <span><em></em>code</span><span><s style="border-color:var(--stale);border-top-style:dashed"></s>broken receipt</span>
     </div>
+    <div class="engine" id="engine"></div>
   </section>
-  <aside class="detail">
+
+  <aside class="desk">
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="memory">Memory</button>
       <button role="tab" aria-selected="false" data-tab="cypher">Cypher</button>
     </div>
-    <div class="pane" id="pane-memory"><div class="empty">Select a memory or a node in the graph.</div></div>
-    <div class="pane" id="pane-cypher" hidden>
-      <div class="muted">Every panel on this page is a Cypher query against Relate running in this tab. Try your own:</div>
+    <div class="pane" id="pane-memory"><p class="hint">Pick a memory to see its receipts.</p></div>
+    <div class="pane ask" id="pane-cypher" hidden>
+      <p>Every part of this page is a Cypher query against Relate, running here in your browser. Try one:</p>
       <div class="samples" id="samples"></div>
-      <textarea id="q" class="mono" spellcheck="false"></textarea>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="run" id="run">Run ⌘↵</button><span class="muted" id="qtime"></span></div>
+      <textarea id="q" spellcheck="false" aria-label="Cypher query"></textarea>
+      <div class="runbar"><button class="run" id="run">Run query</button><span class="meta" id="qtime">or press ⌘ Enter</span></div>
       <div id="qout"></div>
     </div>
   </aside>
 </main>
+
 <script type="module">
 import init, { RelateDb } from "https://cdn.jsdelivr.net/npm/@relate/relate-wasm@1.0.2/relate.js";
 
@@ -162,6 +311,8 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const STATUS = ["fresh", "stale", "suspect", "superseded", "retracted"];
 const INACTIVE = new Set(["superseded", "retracted"]);
+const MARK = { fresh: "✓", stale: "✗", suspect: "?", superseded: "↷", retracted: "⌫" };
+const SANS = '"Instrument Sans", system-ui, sans-serif', MONO = '"Spline Sans Mono", ui-monospace, monospace';
 
 let db, cy, facts = [], cites = [], selected = null;
 const shown = new Set(["fresh", "stale", "suspect"]);
@@ -179,7 +330,7 @@ function q(cypher, params) {
 
 async function boot() {
   const t0 = performance.now();
-  await init();
+  await Promise.all([init(), document.fonts.load(`600 12px ${SANS}`), document.fonts.load(`500 11px ${MONO}`)]);
   db = new RelateDb();
   let datasets = [];
   try { const r = await fetch("datasets.json"); if (r.ok) datasets = await r.json(); } catch {}
@@ -187,16 +338,15 @@ async function boot() {
   if (datasets.length > 1) {
     const sel = $("#dataset");
     sel.innerHTML = datasets.map((d) => `<option value="${esc(d.file)}" ${d.file === url ? "selected" : ""}>${esc(d.label)}</option>`).join("");
-    sel.hidden = false;
-    sel.onchange = () => { location.search = "?data=" + encodeURIComponent(sel.value); };
+    $("#dataset-wrap").hidden = false;
+    sel.onchange = () => { const p = new URLSearchParams(location.search); p.set("data", sel.value); location.search = p; };
   }
   const script = await (await fetch(url)).text();
-  const envs = db.executeScript(script, null).map((e) => JSON.parse(e));
-  const bad = envs.find((e) => e.error);
+  const bad = db.executeScript(script, null).map((e) => JSON.parse(e)).find((e) => e.error);
   if (bad) throw new Error(bad.error);
   const ms = performance.now() - t0;
   const n = q("MATCH (n) RETURN count(n) AS n")[0].n, r = q("MATCH ()-[r]->() RETURN count(r) AS n")[0].n;
-  $("#engine").textContent = `Relate WASM · ${n} nodes · ${r} relationships · ${ms.toFixed(0)} ms`;
+  $("#engine").textContent = `Relate is running in this tab: ${n} nodes and ${r} relationships, ready in ${ms.toFixed(0)} ms.`;
   load();
   $("#loading").remove();
 }
@@ -209,79 +359,81 @@ function load() {
              RETURN f.id AS fact, labels(e)[0] AS label, coalesce(e.key, e.path) AS target, c.mode AS mode,
                     c.hash AS hash, e.body_hash AS body_hash, e.hash AS file_hash, coalesce(e.deleted, false) AS deleted,
                     c.ok AS ok, c.quote AS quote, c.line AS line, e.qualname AS qualname, e.label AS elabel,
-                    coalesce(c.followed, []) AS followed, c.snapshot AS snapshot, e.source AS source`)
+                    coalesce(c.followed, []) AS followed, c.snapshot AS snapshot, e.source AS source, e.start AS start`)
     .map((c) => ({ ...c, broken: c.mode === "symbol" ? (c.deleted || c.body_hash !== c.hash)
                               : c.mode === "quote" ? (c.deleted || c.ok === false)
                               : c.mode === "file" ? (c.deleted || c.file_hash !== c.hash) : false }));
-  renderChips(); renderList(); renderGraph();
-  const first = facts.find((f) => f.status === "suspect") || facts.find((f) => f.status === "stale") ||
-                facts.find(visible);
+  renderTally(); renderList(); renderGraph();
+  const asked = new URLSearchParams(location.search).get("m");
+  const linked = asked && facts.find((f) => f.id === asked);
+  if (linked && INACTIVE.has(linked.status)) { setOld(true); renderTally(); renderList(); renderGraph(); }
+  const first = linked || facts.find((f) => f.status === "suspect") || facts.find((f) => f.status === "stale") || facts.find(visible);
   if (first) select(first.id);
 }
 
-// Line diff (LCS) between what was remembered and the code now.
-function diffLines(a, b) {
-  const A = (a || "").split("\n"), B = (b || "").split("\n");
-  const n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
-    L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
-  const out = [];
-  let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) { out.push([" ", A[i]]); i++; j++; }
-    else if (L[i + 1][j] >= L[i][j + 1]) out.push(["-", A[i++]]);
-    else out.push(["+", B[j++]]);
-  }
-  while (i < n) out.push(["-", A[i++]]);
-  while (j < m) out.push(["+", B[j++]]);
-  return out.map(([k, t]) => k === " " ? `<span class="muted">  ${esc(t)}</span>` :
-    `<span style="color:var(--${k === "+" ? "add" : "del"})">${k} ${esc(t)}</span>`).join("\n");
-}
+const color = (s) => css(`--${s}`) || css("--graphite");
+const visible = (f) => INACTIVE.has(f.status) ? showOld : shown.has(f.status);
 
-const color = (s) => css(`--${s}`) || css("--muted");
-const badge = (s) => `<span class="badge" style="background:${color(s)}">${esc(s)}</span>`;
-
-function renderChips() {
+function renderTally() {
   const counts = Object.fromEntries(STATUS.map((s) => [s, facts.filter((f) => f.status === s).length]));
-  $("#chips").innerHTML = STATUS.filter((s) => counts[s]).map((s) =>
-    `<span class="chip" role="button" tabindex="0" data-s="${s}" aria-pressed="${shown.has(s) || (showOld && INACTIVE.has(s))}">
-       <span class="dot" style="background:${color(s)}"></span>${counts[s]} ${s}</span>`).join("");
-  document.querySelectorAll(".chip").forEach((el) => el.onclick = () => {
+  const label = { superseded: "replaced", retracted: "retracted" };
+  $("#tally").innerHTML = STATUS.filter((s) => counts[s]).map((s) => {
+    const on = INACTIVE.has(s) ? showOld : shown.has(s);
+    return `<button data-s="${s}" aria-pressed="${on}" title="${on ? "Hide" : "Show"} ${label[s] || s} memories">
+      <span class="m" style="color:${color(s)}">${MARK[s]}</span><b>${counts[s]}</b>${label[s] || s}</button>`;
+  }).join("");
+  document.querySelectorAll("#tally button").forEach((el) => el.onclick = () => {
     const s = el.dataset.s;
-    if (INACTIVE.has(s)) { showOld = !showOld; $("#tg-old").setAttribute("aria-pressed", showOld); }
-    else shown.has(s) ? shown.delete(s) : shown.add(s);
-    renderChips(); renderList(); renderGraph();
+    if (INACTIVE.has(s)) setOld(!showOld); else { shown.has(s) ? shown.delete(s) : shown.add(s); }
+    renderTally(); renderList(); renderGraph();
   });
 }
 
-function visible(f) { return INACTIVE.has(f.status) ? showOld : shown.has(f.status); }
+function setOld(v) { showOld = v; $("#tg-old").setAttribute("aria-pressed", v); }
 
 function renderList() {
-  const term = $("#filter").value.toLowerCase();
-  const rows = facts.filter((f) => visible(f) && (!term || (f.id + " " + f.text).toLowerCase().includes(term)));
-  $("#items").innerHTML = rows.length ? rows.map((f) => `
-    <div class="item ${INACTIVE.has(f.status) ? "inactive" : ""} ${selected === f.id ? "sel" : ""}" data-id="${f.id}">
-      <div class="top"><span class="id">${f.id}</span>${badge(f.status)}<span>${esc(f.kind)}</span></div>
-      <div class="txt">${esc(f.text)}</div>
-    </div>`).join("") : `<div class="empty">No memories match.</div>`;
-  document.querySelectorAll(".item").forEach((el) => el.onclick = () => select(el.dataset.id));
+  const term = $("#filter").value.trim().toLowerCase();
+  const rows = facts.filter((f) => visible(f) && (!term || (f.id + " " + f.text + " " + f.kind).toLowerCase().includes(term)));
+  $("#rows").innerHTML = rows.length ? rows.map((f) => `
+    <button class="row ${INACTIVE.has(f.status) ? "inactive" : ""}" role="option" data-id="${f.id}"
+            aria-current="${selected === f.id}" aria-label="${f.id}, ${f.status}: ${esc(f.text)}">
+      <span class="m" style="color:${color(f.status)}" title="${f.status}">${MARK[f.status]}</span>
+      <span class="rid">${f.id}</span>
+      <span class="claim">${esc(f.text)}</span>
+      <span class="kind">${esc(f.kind)}${f.status !== "fresh" ? `, ${f.status}` : ""}</span>
+    </button>`).join("")
+    : `<p class="empty">${term ? "No memories match that search." : "No memories with these statuses. Turn one on above."}</p>`;
+  document.querySelectorAll(".row").forEach((el) => el.onclick = () => select(el.dataset.id));
 }
+
+$("#rows").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const ids = [...document.querySelectorAll(".row")].map((el) => el.dataset.id);
+  const i = ids.indexOf(selected);
+  const next = ids[Math.max(0, Math.min(ids.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+  if (next) { e.preventDefault(); select(next); document.querySelector(`.row[data-id="${next}"]`)?.focus(); }
+});
 
 function shortLabel(c) {
   if (c.mode === "symbol") return c.qualname || c.target.split("::").pop();
   if (c.mode === "quote") return `${c.target.split("/").pop()}:${c.line}`;
   if (c.mode === "file") return c.target.split("/").pop();
-  return (c.elabel || c.target).slice(0, 24);
+  return (c.elabel || c.target).slice(0, 22);
+}
+
+function syncPaper() {   // the graph paper pans and zooms with the graph
+  const z = cy.zoom(), p = cy.pan(), el = $(".paper");
+  el.style.backgroundSize = `${120 * z}px ${120 * z}px, ${120 * z}px ${120 * z}px, ${24 * z}px ${24 * z}px, ${24 * z}px ${24 * z}px`;
+  el.style.backgroundPosition = Array(4).fill(`${p.x}px ${p.y}px`).join(", ");
 }
 
 function renderGraph() {
   const vis = new Set(facts.filter(visible).map((f) => f.id));
   const els = [];
-  for (const f of facts) if (vis.has(f.id))
-    els.push({ data: { id: f.id, label: f.id, kind: "fact", status: f.status } });
+  for (const f of facts) if (vis.has(f.id)) els.push({ data: { id: f.id, label: f.id, kind: "fact", status: f.status } });
   const targets = new Map();
   for (const c of cites) if (vis.has(c.fact)) {
-    const tid = (c.mode === "quote" ? "q:" + c.target + ":" + c.quote : c.target);
+    const tid = c.mode === "quote" ? `q:${c.target}:${c.quote}` : c.target;
     if (!targets.has(tid)) {
       targets.set(tid, true);
       els.push({ data: { id: tid, label: shortLabel(c), kind: c.mode === "symbol" ? "symbol" : c.mode === "external" ? "source" : "file", deleted: c.deleted } });
@@ -306,56 +458,111 @@ function renderGraph() {
     }
   }
   if (cy) cy.destroy();
+  const ink = css("--ink"), graphite = css("--graphite"), paper = css("--paper"), ledger = css("--ledger");
   cy = cytoscape({
-    container: $("#cy"), elements: els, wheelSensitivity: 0.25, minZoom: 0.2, maxZoom: 3,
-    layout: { name: "cose", animate: false, randomize: true, numIter: 2500, nodeRepulsion: () => 60000,
-              idealEdgeLength: () => 85, nodeOverlap: 40, gravity: 0.35, componentSpacing: 90, padding: 40 },
+    container: $("#cy"), elements: els, wheelSensitivity: 0.25, minZoom: 0.25, maxZoom: 3,
+    layout: { name: "cose", animate: false, randomize: true, numIter: 2500, nodeRepulsion: () => 70000,
+              idealEdgeLength: () => 90, nodeOverlap: 40, gravity: 0.35, componentSpacing: 100, padding: 56 },
     style: [
-      { selector: "node", style: { "font-family": "Inter, system-ui, sans-serif", "font-size": 10, color: css("--ink"),
-        "text-valign": "bottom", "text-margin-y": 4, label: "data(label)", "text-wrap": "ellipsis", "text-max-width": 120,
-        "text-background-color": css("--bg"), "text-background-opacity": 0.85, "text-background-padding": 2,
-        "text-background-shape": "round-rectangle" } },
-      { selector: 'node[kind="fact"]', style: { width: 30, height: 30, "background-color": (n) => color(n.data("status")),
-        "font-weight": 700, "font-size": 11, "text-valign": "center", "text-margin-y": 0, color: "#fff",
-        "border-width": 0, "text-background-opacity": 0 } },
-      { selector: 'node[kind="fact"][status="superseded"], node[kind="fact"][status="retracted"]', style: { opacity: 0.55, "border-style": "dashed" } },
-      { selector: 'node[kind="symbol"]', style: { shape: "round-rectangle", width: 12, height: 12, "background-color": css("--symbol") } },
-      { selector: "node[?ghost]", style: { "background-opacity": 0.35, color: css("--muted") } },
-      { selector: "node[?deleted]", style: { "background-color": css("--stale"), "background-opacity": 0.4 } },
-      { selector: 'node[kind="file"]', style: { shape: "tag", width: 14, height: 12, "background-color": css("--file") } },
-      { selector: 'node[kind="source"]', style: { shape: "diamond", width: 12, height: 12, "background-color": css("--source") } },
-      { selector: "edge", style: { width: 1.4, "curve-style": "bezier", "target-arrow-shape": "triangle", "arrow-scale": 0.7,
-        "line-color": css("--muted"), "target-arrow-color": css("--muted"), opacity: 0.75 } },
-      { selector: 'edge[kind="cites"][?broken]', style: { "line-color": css("--stale"), "target-arrow-color": css("--stale"), "line-style": "dashed" } },
-      { selector: 'edge[kind="derived"]', style: { "line-color": css("--accent"), "target-arrow-color": css("--accent"), "line-style": "dashed", width: 2 } },
-      { selector: 'edge[kind="calls"]', style: { "line-color": css("--symbol"), "target-arrow-color": css("--symbol"), "line-style": "dotted", opacity: 0.6 } },
+      { selector: "node", style: { "font-family": MONO, "font-size": 10.5, color: graphite, label: "data(label)",
+        "text-valign": "bottom", "text-margin-y": 5, "text-wrap": "ellipsis", "text-max-width": 130,
+        "text-background-color": ledger, "text-background-opacity": 0.9, "text-background-padding": 2 } },
+      { selector: 'node[kind="fact"]', style: { width: 34, height: 34, shape: "ellipse", "background-color": paper,
+        "border-width": 2.5, "border-color": (n) => color(n.data("status")), color: (n) => color(n.data("status")),
+        "font-family": SANS, "font-weight": 700, "font-size": 11.5, "text-valign": "center", "text-margin-y": 0,
+        "text-background-opacity": 0 } },
+      { selector: 'node[kind="fact"][status="superseded"], node[kind="fact"][status="retracted"]',
+        style: { "border-style": "dashed", opacity: 0.6 } },
+      { selector: 'node[kind="symbol"]', style: { shape: "round-rectangle", width: 11, height: 11, "background-color": css("--code") } },
+      { selector: "node[?ghost]", style: { "background-opacity": 0.35, color: css("--faint") } },
+      { selector: "node[?deleted]", style: { "background-color": css("--stale"), "background-opacity": 0.5 } },
+      { selector: 'node[kind="file"]', style: { shape: "tag", width: 14, height: 11, "background-color": css("--code") } },
+      { selector: 'node[kind="source"]', style: { shape: "diamond", width: 12, height: 12, "background-color": css("--carbon") } },
+      { selector: "edge", style: { width: 1.3, "curve-style": "bezier", "target-arrow-shape": "triangle", "arrow-scale": 0.65,
+        "line-color": graphite, "target-arrow-color": graphite, opacity: 0.55 } },
+      { selector: 'edge[kind="cites"][?broken]', style: { "line-color": css("--stale"), "target-arrow-color": css("--stale"), "line-style": "dashed", opacity: 0.85 } },
+      { selector: 'edge[kind="derived"]', style: { "line-color": css("--carbon"), "target-arrow-color": css("--carbon"), "line-style": "dashed", width: 1.8, opacity: 0.85 } },
+      { selector: 'edge[kind="calls"]', style: { "line-color": css("--code"), "target-arrow-color": css("--code"), "line-style": "dotted", width: 1.2, opacity: 0.6 } },
       { selector: 'edge[kind="supersedes"]', style: { "line-color": css("--superseded"), "target-arrow-color": css("--superseded"), "line-style": "dotted" } },
-      { selector: ".faded", style: { opacity: 0.25 } },
-      { selector: "node.hl", style: { "border-width": 3, "border-color": css("--ink") } },
+      { selector: ".faded", style: { opacity: 0.32 } },
+      { selector: 'node.focus[kind="fact"]', style: { "background-color": (n) => color(n.data("status")), color: paper, "border-color": ink, "border-width": 2 } },
+      { selector: "node.focus", style: { "border-color": ink, "border-width": 2 } },
     ],
   });
-  cy.on("tap", "node", (e) => {
-    const d = e.target.data();
-    if (d.kind === "fact") select(d.id); else showSymbol(d.id);
-  });
-  cy.on("tap", (e) => { if (e.target === cy) { cy.elements().removeClass("faded hl"); } });
-  if (selected) highlight(selected);
+  cy.on("tap", "node", (e) => { const d = e.target.data(); d.kind === "fact" ? select(d.id) : showSymbol(d.id); });
+  cy.on("tap", (e) => { if (e.target === cy) cy.elements().removeClass("faded focus"); });
+  cy.on("viewport", syncPaper);
+  syncPaper();
+  if (selected) focusNode(selected);
 }
 
-function highlight(id) {
+function focusNode(id) {
   if (!cy) return;
   const n = cy.getElementById(id);
-  cy.elements().removeClass("faded hl");
+  cy.elements().removeClass("faded focus");
   if (!n.length) return;
-  const hood = n.closedNeighborhood().union(n.successors().filter((x) => x.data("kind") !== "calls" || true));
+  const hood = n.closedNeighborhood().union(n.successors());
   cy.elements().not(hood).addClass("faded");
-  n.addClass("hl");
+  n.addClass("focus");
+}
+
+// Line diff (LCS) between what was remembered and the code now.
+function diffLines(a, b) {
+  const A = (a || "").split("\n"), B = (b || "").split("\n");
+  const n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push(["ctx", "  " + A[i]]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) out.push(["del", "- " + A[i++]]);
+    else out.push(["add", "+ " + B[j++]]);
+  }
+  while (i < n) out.push(["del", "- " + A[i++]]);
+  while (j < m) out.push(["add", "+ " + B[j++]]);
+  return out.map(([k, t]) => `<span class="${k}">${esc(t)}</span>`).join("\n");
+}
+
+function receiptItem(c) {
+  const mark = c.mode === "external" ? `<span class="ext">•</span>` : c.broken ? `<span class="bad">✗</span>` : `<span class="ok">✓</span>`;
+  let name, where;
+  if (c.mode === "symbol") {
+    const [path, sym] = c.target.split("::");
+    name = esc(sym || c.target);
+    where = esc(path) + (c.start ? `, line ${c.start}` : "");
+  } else if (c.mode === "quote") {
+    name = `"${esc(c.quote)}"`;
+    where = esc(c.target) + (c.line ? `, line ${c.line}` : "");
+  } else if (c.mode === "file") {
+    name = esc(c.target.split("/").pop());
+    where = esc(c.target);
+  } else {
+    name = esc(c.elabel || c.target);
+    where = "";
+  }
+  const what = `${name}${where ? `<span class="where">${where}</span>` : ""}`;
+  const subs = [];
+  if (c.followed.length) subs.push(`followed the rename from ${c.followed.map(esc).join(", ")}`);
+  if (c.mode === "external") subs.push("a person vouched for this; it can't be checked against code");
+  else if (c.broken && c.deleted) subs.push("this code was deleted");
+  else if (c.broken && c.mode === "quote") subs.push("this text is no longer in the file");
+  else if (c.broken) subs.push("changed since this was remembered:");
+  let body = "";
+  if (c.mode === "symbol" && c.source) {
+    body = c.broken && c.snapshot ? `<pre class="code">${diffLines(c.snapshot, c.deleted ? "" : c.source)}</pre>`
+                                  : `<pre class="code">${esc(c.source || c.snapshot)}</pre>`;
+  } else if (c.mode === "quote" && c.broken && c.snapshot) {
+    body = `<pre class="code"><span class="ctx">${esc(c.snapshot)}</span></pre>`;
+  }
+  return `<div class="item"><div class="line">${mark}<span class="tgt">${what}</span></div>
+          ${subs.map((s) => `<div class="sub">${s}</div>`).join("")}${body}</div>`;
 }
 
 function select(id) {
   selected = id;
+  try { const p = new URLSearchParams(location.search); p.set("m", id); history.replaceState(null, "", "?" + p); } catch {}
   renderList();
-  highlight(id);
+  focusNode(id);
   showTab("memory");
   const f = facts.find((x) => x.id === id);
   if (!f) return;
@@ -365,65 +572,66 @@ function select(id) {
   const older = q("MATCH (:Fact {id: $id})-[:SUPERSEDES]->(o:Fact) RETURN o.id AS id, o.status AS status, o.text AS text", { id });
   const hist = q("MATCH (:Fact {id: $id})-[:VERIFIED]->(v:Verification) RETURN v.action AS action, v.note AS note, v.at AS at, v.by AS by ORDER BY v.at", { id });
   const broke = q("MATCH (:Fact {id: $id})-[:INVALIDATED_BY]->(c:Change) RETURN c.detail AS detail, c.commit AS commit ORDER BY c.tick", { id });
-  const link = (r) => `<div style="margin:4px 0"><span class="link" data-go="${r.id}">${r.id}</span> ${badge(r.status)} <span class="muted">${esc(r.text)}</span></div>`;
+  const link = (r) => `<button class="link" data-go="${r.id}"><span class="rid">${r.id}</span>
+      <span style="color:${color(r.status)};font-weight:700">${MARK[r.status]}</span><span class="t">${esc(r.text)}</span></button>`;
+  const when = (s) => { const d = new Date(s); return isNaN(d) ? esc(s) : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
+  const section = (title, html) => html ? `<hr class="perf"><h3>${title}</h3>${html}` : "";
   $("#pane-memory").innerHTML = `
-    <div class="muted" style="font-size:12px">${f.id} · ${esc(f.kind)}</div>
-    <h2>${esc(f.text)}</h2>
-    <div style="margin:6px 0 2px">${badge(f.status)}${f.superseded_by ? ` <span class="muted">replaced by</span> <span class="link" data-go="${f.superseded_by}">${f.superseded_by}</span>` : ""}</div>
-    ${f.reasons.map((r) => `<div class="reason">⚠ ${esc(r)}</div>`).join("")}
-    ${broke.length ? `<div class="muted" style="font-size:12.5px">broken by: ${broke.map((b) => esc(b.detail) + (b.commit ? ` (${esc(b.commit)})` : "")).join("; ")}</div>` : ""}
-    <h3>Receipts</h3>
-    ${mine.map((c) => {
-      const mark = c.mode === "external" ? `<span class="ext">•</span>` : c.broken ? `<span class="bad">✗</span>` : `<span class="ok">✓</span>`;
-      const what = c.mode === "quote" ? `${esc(c.target)}:${c.line} <code>"${esc(c.quote)}"</code>` : `<code>${esc(c.elabel || c.target)}</code>`;
-      const fol = c.followed.length ? `<small>followed rename from ${c.followed.map(esc).join(", ")}</small>` : "";
-      const note = c.mode === "external" ? `<small>vouched for by a person; never auto-checked</small>` :
-                   c.broken ? `<small>changed since this was remembered</small>` : `<small>matches the code</small>`;
-      const body = c.mode === "symbol" && c.source
-        ? (c.broken && c.snapshot ? `<pre class="code">${diffLines(c.snapshot, c.deleted ? "" : c.source)}</pre>`
-                                  : `<pre class="code">${esc(c.source || c.snapshot)}</pre>`)
-        : c.mode === "quote" && c.broken && c.snapshot ? `<pre class="code">${esc(c.snapshot)}</pre><small>remembered context; the quoted line is gone from the file</small>` : "";
-      return `<div class="receipt"><div class="head">${mark}<div>${what}${fol}${note}</div></div>${body}</div>`;
-    }).join("")}
-    ${parents.length ? `<h3>Builds on</h3>${parents.map(link).join("")}` : ""}
-    ${kids.length ? `<h3>Supports</h3>${kids.map(link).join("")}` : ""}
-    ${older.length ? `<h3>Replaced</h3>${older.map(link).join("")}` : ""}
-    ${hist.length ? `<h3>History</h3>${hist.map((h) => `<div class="hist">${esc(h.at)} · ${esc(h.action)} by ${esc(h.by)}${h.note ? ": " + esc(h.note) : ""}</div>`).join("")}` : ""}`;
+    <article class="slip">
+      <div class="slip-head"><span>Memory ${f.id}</span><span>${esc(f.kind)}</span></div>
+      <h2 class="claim-big ${f.text.length > 140 ? "long" : ""}">${esc(f.text)}</h2>
+      <div class="stamp-wrap"><span class="stamp" style="color:${color(f.status)}">${esc(f.status)}</span></div>
+      ${section("Why it was flagged",
+        f.reasons.map((r) => `<p class="reason ${f.status === "stale" ? "stale" : ""}">${esc(r)}</p>`).join("") +
+        (broke.length ? `<p class="broke">Broken by ${broke.map((b) => esc(b.detail) + (b.commit ? ` in commit ${esc(b.commit)}` : "")).join("; ")}.</p>` : ""))}
+      ${f.superseded_by ? section("Replaced by", link(facts.find((x) => x.id === f.superseded_by) || { id: f.superseded_by, status: "fresh", text: "" })) : ""}
+      ${section("Receipts", mine.map(receiptItem).join(""))}
+      ${section("Builds on", parents.map(link).join(""))}
+      ${section("Supports", kids.map(link).join(""))}
+      ${section("Replaces", older.map(link).join(""))}
+      ${section("History", hist.map((h) => `<p class="hist">${when(h.at)}, ${esc(h.action)} by ${esc(h.by)}${h.note ? `: ${esc(h.note)}` : ""}</p>`).join(""))}
+    </article>`;
   document.querySelectorAll("[data-go]").forEach((el) => el.onclick = () => {
     const go = el.dataset.go, g = facts.find((x) => x.id === go);
-    if (g && INACTIVE.has(g.status) && !showOld) { showOld = true; $("#tg-old").setAttribute("aria-pressed", "true"); renderChips(); renderGraph(); }
+    if (g && INACTIVE.has(g.status) && !showOld) { setOld(true); renderTally(); renderGraph(); }
     select(go);
   });
 }
 
 function showSymbol(key) {
-  highlight(key);
+  focusNode(key);
+  showTab("memory");
   const s = q(`MATCH (s:Symbol {key: $k}) OPTIONAL MATCH (s)<-[:CITES]-(f:Fact)
                RETURN s.key AS key, s.signature AS sig, s.source AS source, s.deleted AS deleted, collect(f.id) AS facts`, { k: key })[0];
-  showTab("memory");
-  if (!s) { $("#pane-memory").innerHTML = `<div class="muted">${esc(key)}</div>`; return; }
+  if (!s) { $("#pane-memory").innerHTML = `<article class="slip"><div class="slip-head"><span>Receipt</span></div><h2 class="claim-big">${esc(key)}</h2></article>`; return; }
   const callers = q("MATCH (c:Symbol)-[:CALLS]->(:Symbol {key: $k}) RETURN c.qualname AS n", { k: key }).map((r) => r.n);
   const callees = q("MATCH (:Symbol {key: $k})-[:CALLS]->(c:Symbol) RETURN c.qualname AS n", { k: key }).map((r) => r.n);
   const changes = q("MATCH (:Symbol {key: $k})<-[:ON]-(c:Change) RETURN c.detail AS d, c.commit AS commit ORDER BY c.tick", { k: key });
+  const cited = facts.filter((f) => s.facts.includes(f.id));
+  const section = (title, html) => html ? `<hr class="perf"><h3>${title}</h3>${html}` : "";
   $("#pane-memory").innerHTML = `
-    <div class="muted" style="font-size:12px">code${s.deleted ? " · deleted" : ""}</div>
-    <h2 class="mono" style="font-size:14px">${esc(s.key)}</h2>
-    <pre class="code">${esc(s.source || s.sig)}</pre>
-    <h3>Cited by</h3>${s.facts.length ? s.facts.map((id) => `<span class="link" data-go="${id}">${id}</span>`).join(" · ") : `<span class="muted">no memories</span>`}
-    ${callers.length ? `<h3>Called by</h3><div class="mono">${callers.map(esc).join(", ")}</div>` : ""}
-    ${callees.length ? `<h3>Calls</h3><div class="mono">${callees.map(esc).join(", ")}</div>` : ""}
-    ${changes.length ? `<h3>Changes</h3>${changes.map((c) => `<div class="hist">${esc(c.d)}${c.commit ? ` (${esc(c.commit)})` : ""}</div>`).join("")}` : ""}`;
+    <article class="slip">
+      <div class="slip-head"><span>Code</span><span>${s.deleted ? "deleted" : ""}</span></div>
+      <h2 class="claim-big mono" style="font-size:15px;font-weight:500">${esc(s.key)}</h2>
+      <pre class="code" style="margin-left:0">${esc(s.source || s.sig)}</pre>
+      ${section("Cited by", cited.map((f) => `<button class="link" data-go="${f.id}"><span class="rid">${f.id}</span>
+        <span style="color:${color(f.status)};font-weight:700">${MARK[f.status]}</span><span class="t">${esc(f.text)}</span></button>`).join("")
+        || `<p class="hist">No memory cites this code.</p>`)}
+      ${section("Called by", callers.length ? `<p class="item">${callers.map(esc).join(", ")}</p>` : "")}
+      ${section("Calls", callees.length ? `<p class="item">${callees.map(esc).join(", ")}</p>` : "")}
+      ${section("Changes", changes.map((c) => `<p class="hist">${esc(c.d)}${c.commit ? `, commit ${esc(c.commit)}` : ""}</p>`).join(""))}
+    </article>`;
   document.querySelectorAll("[data-go]").forEach((el) => el.onclick = () => select(el.dataset.go));
 }
 
 const SAMPLES = {
-  "What's not fresh, and why?": "MATCH (f:Fact)\nWHERE f.status IN ['stale', 'suspect']\nRETURN f.id, f.status, f.reasons",
-  "Derivation chains": "MATCH p = (f:Fact)-[:DERIVED_FROM]->+(root:Fact)\nWHERE NOT EXISTS { (root)-[:DERIVED_FROM]->() }\nRETURN f.id AS memory, [n IN nodes(p) | n.id] AS chain",
-  "Upstream drift (2 hops)": "MATCH (f:Fact)-[:CITES]->(s:Symbol)-[:CALLS]->{1,2}(t:Symbol)<-[:ON]-(c:Change {kind: 'signature'})\nRETURN f.id, s.qualname AS cites, t.qualname AS depends_on, c.detail",
-  "Changes that broke memories": "MATCH (f:Fact)-[:INVALIDATED_BY]->(c:Change)\nRETURN c.detail AS change, c.commit, collect(f.id) AS broke",
-  "Renames followed": "MATCH (old:Symbol)-[:MOVED_TO]->(new:Symbol)\nRETURN old.key AS was, new.key AS now",
-  "Impact of Money.times": "MATCH (f:Fact)-[:CITES]->(c:Symbol)-[:CALLS]->{1,2}(t:Symbol {qualname: 'Money.times'})\nWHERE NOT f.status IN ['superseded', 'retracted']\nRETURN DISTINCT f.id, f.text, c.qualname AS via",
-  "Memory history": "MATCH (f:Fact)-[:VERIFIED]->(v:Verification)\nRETURN f.id, v.action, v.note, v.at ORDER BY v.at",
+  "Which memories need attention, and why?": "MATCH (f:Fact)\nWHERE f.status IN ['stale', 'suspect']\nRETURN f.id, f.status, f.reasons",
+  "What does each memory build on?": "MATCH p = (f:Fact)-[:DERIVED_FROM]->+(root:Fact)\nWHERE NOT EXISTS { (root)-[:DERIVED_FROM]->() }\nRETURN f.id AS memory, [n IN nodes(p) | n.id] AS chain",
+  "Where did a signature change ripple two calls away?": "MATCH (f:Fact)-[:CITES]->(s:Symbol)-[:CALLS]->{1,2}(t:Symbol)<-[:ON]-(c:Change {kind: 'signature'})\nRETURN f.id, s.qualname AS cites, t.qualname AS depends_on, c.detail",
+  "Which code changes broke memories?": "MATCH (f:Fact)-[:INVALIDATED_BY]->(c:Change)\nRETURN c.detail AS change, c.commit, collect(f.id) AS broke",
+  "Which renames were followed?": "MATCH (old:Symbol)-[:MOVED_TO]->(new:Symbol)\nRETURN old.key AS was, new.key AS now",
+  "What depends on Money.times?": "MATCH (f:Fact)-[:CITES]->(c:Symbol)-[:CALLS]->{1,2}(t:Symbol {qualname: 'Money.times'})\nWHERE NOT f.status IN ['superseded', 'retracted']\nRETURN DISTINCT f.id, f.text, c.qualname AS via",
+  "How was memory repaired over time?": "MATCH (f:Fact)-[:VERIFIED]->(v:Verification)\nRETURN f.id, v.action, v.note, v.at ORDER BY v.at",
 };
 
 function runQuery() {
@@ -432,15 +640,15 @@ function runQuery() {
   const t0 = performance.now();
   try {
     const rows = q(text);
-    $("#qtime").textContent = `${rows.length} rows · ${(performance.now() - t0).toFixed(1)} ms`;
-    if (!rows.length) { $("#qout").innerHTML = `<div class="empty">No rows.</div>`; return; }
+    $("#qtime").textContent = `${rows.length} ${rows.length === 1 ? "row" : "rows"} in ${(performance.now() - t0).toFixed(1)} ms`;
+    if (!rows.length) { $("#qout").innerHTML = `<p class="meta" style="margin-top:12px">The query ran and matched nothing.</p>`; return; }
     const cols = Object.keys(rows[0]);
     const cell = (v) => esc(typeof v === "object" && v !== null ? JSON.stringify(v.properties ?? v) : v);
     $("#qout").innerHTML = `<table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${
       rows.map((r) => `<tr>${cols.map((c) => `<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   } catch (e) {
     $("#qtime").textContent = "";
-    $("#qout").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    $("#qout").innerHTML = `<p class="err">Relate rejected the query: ${esc(e.message)}</p>`;
   }
 }
 
@@ -450,28 +658,27 @@ function showTab(name) {
   $("#pane-cypher").hidden = name !== "cypher";
 }
 
-$("#samples").innerHTML = Object.keys(SAMPLES).map((k) => `<button class="ghost" data-k="${esc(k)}">${esc(k)}</button>`).join("");
+$("#samples").innerHTML = Object.keys(SAMPLES).map((k) => `<button data-k="${esc(k)}">${esc(k)}</button>`).join("");
 document.querySelectorAll("#samples button").forEach((b) => b.onclick = () => { $("#q").value = SAMPLES[b.dataset.k]; runQuery(); });
-$("#q").value = SAMPLES["Upstream drift (2 hops)"];
+$("#q").value = SAMPLES["Where did a signature change ripple two calls away?"];
 $("#run").onclick = runQuery;
 $("#q").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") runQuery(); });
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { showTab(b.dataset.tab); if (b.dataset.tab === "cypher") runQuery(); });
 $("#filter").oninput = renderList;
-$("#tg-old").onclick = () => { showOld = !showOld; $("#tg-old").setAttribute("aria-pressed", showOld); renderChips(); renderList(); renderGraph(); };
+$("#tg-old").onclick = () => { setOld(!showOld); renderTally(); renderList(); renderGraph(); };
 $("#tg-calls").onclick = () => { showCalls = !showCalls; $("#tg-calls").setAttribute("aria-pressed", showCalls); renderGraph(); };
-$("#tg-fit").onclick = () => cy && cy.fit(undefined, 40);
+$("#tg-fit").onclick = () => cy && cy.fit(undefined, 56);
 $("#theme").onclick = () => {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   const next = cur === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("receipts-theme", next); } catch {}
-  renderChips(); renderList(); renderGraph(); if (selected) select(selected);
+  renderTally(); renderList(); renderGraph(); if (selected) select(selected);
 };
 
 boot().catch((e) => {
   console.error(e);
-  $("#loading").innerHTML = `<div><strong>Couldn't start Relate in this browser.</strong><span class="err">${esc(e.message)}</span></div>`;
+  $("#loading").innerHTML = `<div><strong>Relate couldn't start in this browser</strong><span>${esc(e.message)}. Try a current version of Chrome, Firefox or Safari.</span></div>`;
 });
 </script>
 </body>
