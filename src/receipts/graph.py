@@ -21,8 +21,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .codegraph import (FileInfo, SymbolInfo, list_files, module_index, read_text, resolve_imports, scan_text, sha,
-                        stat_file)
+from .codegraph import (HASH_VERSION, FileInfo, SymbolInfo, hash_snippet, list_files, module_index, read_text,
+                        resolve_imports, scan_repo, scan_text, sha, stat_file)
 from .store import Store, now_iso
 
 SNAPSHOT_MAX = 4000
@@ -81,6 +81,7 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
     deleted files.
     """
     report = SyncReport()
+    _maybe_migrate(store, root)
     stored = {r["path"]: r for r in store.q(
         "MATCH (f:File) RETURN f.path AS path, f.hash AS hash, f.deleted AS deleted, f.size AS size, "
         "f.mtime AS mtime")}
@@ -136,7 +137,7 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
     old_syms = {r["key"]: r for r in store.q(
         "MATCH (s:Symbol) WHERE s.path IN $paths AND s.deleted = false "
         "RETURN s.key AS key, s.kind AS kind, s.qualname AS qualname, s.path AS path, "
-        "s.sig_hash AS sig_hash, s.body_hash AS body_hash", paths=touched)}
+        "s.sig_hash AS sig_hash, s.body_hash AS body_hash, s.types_hash AS types_hash", paths=touched)}
     new_syms: dict[str, SymbolInfo] = {s.key: s for fi in changed.values() for s in fi.symbols}
 
     # ---- diff symbols ------------------------------------------------------ #
@@ -147,8 +148,11 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
             continue
         if old["sig_hash"] != s.sig_hash:
             changes.append({"kind": "signature", "key": key, "detail": f"{s.qualname}: signature is now {s.signature}"})
-        elif old["body_hash"] != s.body_hash:
+            continue
+        if old["body_hash"] != s.body_hash:
             changes.append({"kind": "body", "key": key, "detail": f"{s.qualname}: implementation changed"})
+        if old.get("types_hash") is not None and old["types_hash"] != s.types_hash:
+            changes.append({"kind": "types", "key": key, "detail": f"{s.qualname}: type hints are now {s.signature}"})
 
     vanished = [k for k in old_syms if k not in new_syms]
     fresh_keys = [k for k in new_syms if k not in old_syms]
@@ -190,11 +194,13 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
              "UNWIND $rows AS r MERGE (s:Symbol {key: r.key}) "
              "SET s.name = r.name, s.qualname = r.qualname, s.kind = r.kind, s.path = r.path, "
              "    s.start = r.start, s.end = r.end, s.signature = r.signature, s.sig_hash = r.sig_hash, "
-             "    s.body_hash = r.body_hash, s.source = r.source, s.deleted = false, s.tick = $t "
+             "    s.body_hash = r.body_hash, s.types_hash = r.types_hash, s.source = r.source, s.deleted = false, "
+             "    s.tick = $t "
              "WITH s, r MATCH (f:File {path: r.path}) MERGE (f)-[:DEFINES]->(s)",
              [{"key": s.key, "name": s.name, "qualname": s.qualname, "kind": s.kind, "path": s.path,
                "start": s.start, "end": s.end, "signature": s.signature, "sig_hash": s.sig_hash,
-               "body_hash": s.body_hash, "source": s.source[:SNAPSHOT_MAX]} for s in new_syms.values()],
+               "body_hash": s.body_hash, "types_hash": s.types_hash, "source": s.source[:SNAPSHOT_MAX]}
+              for s in new_syms.values()],
              size=200, t=t)
     if vanished:
         _batched(store, "UNWIND $rows AS k MATCH (s:Symbol {key: k}) SET s.deleted = true, s.deleted_tick = $t",
@@ -248,6 +254,38 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
     if recompute:
         report.transitions = recompute_status(store)
     return report
+
+
+def _maybe_migrate(store: Store, root: Path) -> None:
+    """Bring a store built with an older hashing scheme up to HASH_VERSION.
+
+    Symbols are re-hashed from the working tree; each symbol receipt is
+    re-hashed from the snapshot saved when it was cited, so a memory that was
+    stale stays stale and a fresh one stays fresh. No Change records are
+    written: the code didn't change, only how we fingerprint it.
+    """
+    row = store.one("MATCH (m:Meta {key: 'receipts'}) RETURN m.hash_version AS v")
+    if row is None or row["v"] == HASH_VERSION:
+        return
+    if store.one("MATCH (s:Symbol) RETURN s.key AS k LIMIT 1"):
+        cites = store.q("MATCH (f:Fact)-[c:CITES {mode: 'symbol'}]->(s:Symbol) "
+                        "RETURN f.id AS fid, s.key AS key, c.snapshot AS snap, c.hash = s.body_hash AS was_fresh")
+        paths = [r["p"] for r in store.q("MATCH (s:Symbol) WHERE s.deleted = false RETURN DISTINCT s.path AS p")]
+        scanned = scan_repo(root, [p for p in paths if (root / p).is_file()])
+        now = {s.key: s for fi in scanned.values() for s in fi.symbols}
+        _batched(store, "UNWIND $rows AS r MATCH (s:Symbol {key: r.key}) "
+                        "SET s.sig_hash = r.sig, s.body_hash = r.body, s.types_hash = r.types",
+                 [{"key": k, "sig": s.sig_hash, "body": s.body_hash, "types": s.types_hash} for k, s in now.items()])
+        updates = []
+        for c in cites:
+            h = hash_snippet(c["snap"])
+            if h is None and c["was_fresh"] and c["key"] in now:
+                h = (now[c["key"]].sig_hash, now[c["key"]].body_hash)
+            if h:
+                updates.append({"fid": c["fid"], "key": c["key"], "sig": h[0], "body": h[1]})
+        _batched(store, "UNWIND $rows AS r MATCH (:Fact {id: r.fid})-[c:CITES {mode: 'symbol'}]->(:Symbol {key: r.key}) "
+                        "SET c.hash = r.body, c.sig_hash = r.sig", updates)
+    store.q("MATCH (m:Meta {key: 'receipts'}) SET m.hash_version = $v", v=HASH_VERSION)
 
 
 def _check_quotes(store: Store, changed: dict[str, FileInfo], removed: list[str]) -> None:
@@ -388,13 +426,17 @@ def recompute_status(store: Store) -> list[dict]:
         WITH f, collect(x.path + CASE WHEN x.deleted THEN ' was deleted' ELSE ' changed' END) AS why
         SET f.status = 'stale', f.reasons = f.reasons + why""")
 
-    # 2. Upstream drift: code the receipt depends on changed its contract.
+    # 2. Upstream drift: code the receipt depends on changed its contract
+    #    (parameters or type hints), up to two calls away.
     store.q("""
         MATCH (f:Fact {status: 'fresh'})-[c:CITES {mode: 'symbol'}]->(s:Symbol)-[:CALLS]->{1,2}(t:Symbol)
-        WHERE (t.deleted = true AND t.deleted_tick > c.tick)
-           OR EXISTS { MATCH (t)<-[:ON]-(ch:Change {kind: 'signature'}) WHERE ch.tick > c.tick }
-        WITH f, collect(DISTINCT s.qualname + ' depends on ' + t.qualname +
-            CASE WHEN t.deleted THEN ', which was deleted' ELSE ', whose signature changed' END) AS why
+        OPTIONAL MATCH (t)<-[:ON]-(ch:Change) WHERE ch.kind IN ['signature', 'types'] AND ch.tick > c.tick
+        WITH f, s, t, c, collect(ch.kind) AS kinds
+        WHERE size(kinds) > 0 OR (t.deleted = true AND t.deleted_tick > c.tick)
+        WITH f, collect(DISTINCT s.qualname + ' depends on ' + t.qualname + CASE
+            WHEN t.deleted = true THEN ', which was deleted'
+            WHEN 'signature' IN kinds THEN ', whose signature changed'
+            ELSE ', whose type hints changed' END) AS why
         SET f.status = 'suspect', f.reasons = f.reasons + why""")
 
     # 3. Derived: anything built on a fact that is no longer good, any depth.
@@ -409,7 +451,7 @@ def recompute_status(store: Store) -> list[dict]:
     # Link invalid facts to the concrete changes that broke them.
     store.q("""
         MATCH (f:Fact)-[c:CITES]->(e)<-[:ON]-(ch:Change)
-        WHERE f.status = 'stale' AND ch.tick > c.tick AND ch.kind <> 'moved'
+        WHERE f.status = 'stale' AND ch.tick > c.tick AND NOT ch.kind IN ['moved', 'types']
         MERGE (f)-[:INVALIDATED_BY]->(ch)""")
 
     after = {r["id"]: (r["status"], r["reasons"]) for r in store.q(

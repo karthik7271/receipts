@@ -160,7 +160,8 @@ def run(workdir: Path, *, fast: bool = False, keep: bool = False) -> Path:
     n.say("\n  Read that again: Relate did four different things with one graph:")
     n.say("   • M1, M6: the cited code changed → stale.            M3: the quoted config line is gone → stale.")
     n.say("   • M2: apply_discount was renamed and moved; its receipt followed it. But discount_for calls")
-    n.say("     Money.times, whose signature changed two hops away → suspect (upstream drift).")
+    n.say("     Money.times, which now expects Decimal | str while discount_for still passes a float")
+    n.say("     → suspect (upstream drift): exactly the kind of mismatch worth a second look.")
     n.say("   • M4: refunds.py was only reformatted (no change), but it builds on stale M1 → suspect.")
     n.say("   • M7, M8: untouched → still fresh. No false alarms.")
 

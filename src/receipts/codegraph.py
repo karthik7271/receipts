@@ -13,10 +13,12 @@ tracked at file level, which is enough for quote-anchored citations such as
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import os
 import re
 import subprocess
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,6 +53,7 @@ class SymbolInfo:
     body_hash: str
     source: str
     calls: list[str] = field(default_factory=list)
+    types_hash: str = ""   # canonical type hints; changes are recorded but never invalidate
 
 
 @dataclass
@@ -127,19 +130,144 @@ def _dump(nodes) -> str:
     return ast.dump(nodes, include_attributes=False) if nodes is not None else ""
 
 
+# Bump when the hashing changes; stores built with an older version are
+# migrated by graph.sync (citations are re-hashed from their saved snapshots).
+HASH_VERSION = 2
+
+_TYPING_MODULES = {"t", "typing", "te", "typing_extensions", "cabc", "abc"}
+_GENERIC_ALIASES = {"List": "list", "Dict": "dict", "Set": "set", "FrozenSet": "frozenset", "Tuple": "tuple",
+                    "Type": "type"}
+
+
+class _TypeExpr(ast.NodeTransformer):
+    """Canonical form of a type annotation, so equivalent spellings hash the same:
+    ``t.Optional[str]`` == ``str | None``, ``t.Dict[str, int]`` == ``dict[str, int]``,
+    ``"Money"`` == ``Money``, and union member order doesn't matter."""
+
+    def visit_Constant(self, n):
+        if isinstance(n.value, str):
+            try:
+                return self.visit(ast.parse(n.value, mode="eval").body)
+            except SyntaxError:
+                return n
+        return n
+
+    def visit_Attribute(self, n):
+        self.generic_visit(n)
+        if isinstance(n.value, ast.Name) and n.value.id in _TYPING_MODULES:
+            return self.visit_Name(ast.Name(id=n.attr, ctx=ast.Load()))
+        return n
+
+    def visit_Name(self, n):
+        return ast.Name(id=_GENERIC_ALIASES.get(n.id, n.id), ctx=ast.Load())
+
+    def visit_Subscript(self, n):
+        self.generic_visit(n)
+        name = n.value.id if isinstance(n.value, ast.Name) else None
+        args = list(n.slice.elts) if isinstance(n.slice, ast.Tuple) else [n.slice]
+        if name == "Optional":
+            return _union([args[0], ast.Constant(None)])
+        if name == "Union":
+            return _union(args)
+        return n
+
+    def visit_BinOp(self, n):
+        self.generic_visit(n)
+        if isinstance(n.op, ast.BitOr):
+            return _union([n.left, n.right])
+        return n
+
+
+def _union(items: list[ast.expr]) -> ast.expr:
+    members: dict[str, ast.expr] = {}
+    for it in items:
+        parts = it.slice.elts if (isinstance(it, ast.Subscript) and isinstance(it.value, ast.Name)
+                                  and it.value.id == "__union__") else [it]
+        for p in parts:
+            members.setdefault(ast.dump(p, include_attributes=False), p)
+    ordered = [members[k] for k in sorted(members)]
+    return ast.Subscript(value=ast.Name(id="__union__", ctx=ast.Load()),
+                         slice=ast.Tuple(elts=ordered, ctx=ast.Load()), ctx=ast.Load())
+
+
+class _Normalize(ast.NodeTransformer):
+    """What a symbol *does*: type hints and nested docstrings removed.
+
+    Memories describe behaviour, so a hint changing from ``dict`` to
+    ``dict[str, Any]`` must not make one stale. Hint changes are tracked
+    separately (``types_hash``) and recorded, but don't invalidate anything.
+    """
+
+    def _type(self, n):
+        return None
+
+    def visit_arg(self, n):
+        n.annotation = self._type(n.annotation)
+        return n
+
+    def _strip(self, n):
+        self.generic_visit(n)
+        n.body = _strip_docstring(n.body) or [ast.Pass()]
+        return n
+
+    def visit_FunctionDef(self, n):
+        n = self._strip(n)
+        n.returns = self._type(n.returns)
+        return n
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_ClassDef = _strip
+
+    def visit_AnnAssign(self, n):
+        self.generic_visit(n)
+        n.annotation = self._type(n.annotation)
+        return n
+
+
+def _normalized(node):
+    return _Normalize().visit(copy.deepcopy(node))
+
+
+def _types_hash(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """Canonical type hints of a function: equivalent spellings hash the same."""
+    canon = lambda n: "" if n is None else _dump(_TypeExpr().visit(copy.deepcopy(n)))  # noqa: E731
+    a = node.args
+    params = [*a.posonlyargs, *a.args, *a.kwonlyargs, *([a.vararg] if a.vararg else []), *([a.kwarg] if a.kwarg else [])]
+    return sha("|".join([*(f"{p.arg}:{canon(p.annotation)}" for p in params), "->" + canon(node.returns)]))
+
+
 def _func_hashes(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, str, str]:
     sig = f"{node.name}({ast.unparse(node.args)})" + (f" -> {ast.unparse(node.returns)}" if node.returns else "")
-    sig_material = _dump(node.args) + "|" + _dump(node.returns)
-    body_material = sig_material + "|" + _dump(node.decorator_list) + "|" + _dump(_strip_docstring(node.body))
+    norm = _normalized(node)
+    sig_material = _dump(norm.args) + "|" + _dump(norm.returns)
+    body_material = sig_material + "|" + _dump(norm.decorator_list) + "|" + _dump(norm.body)
     return sig, sha(sig_material), sha(body_material)
 
 
 def _class_hashes(node: ast.ClassDef) -> tuple[str, str, str]:
     bases = ", ".join(ast.unparse(b) for b in node.bases)
     sig = f"class {node.name}({bases})" if bases else f"class {node.name}"
-    sig_material = _dump(node.bases) + "|" + _dump(node.keywords)
-    body_material = sig_material + "|" + _dump(node.decorator_list) + "|" + _dump(_strip_docstring(node.body))
+    norm = _normalized(node)
+    sig_material = _dump(norm.bases) + "|" + _dump(norm.keywords)
+    body_material = sig_material + "|" + _dump(norm.decorator_list) + "|" + _dump(norm.body)
     return sig, sha(sig_material), sha(body_material)
+
+
+def hash_snippet(source: str) -> tuple[str, str] | None:
+    """(sig_hash, body_hash) of the first symbol in a saved source snippet, or None."""
+    try:
+        tree = ast.parse(textwrap.dedent(source or ""))
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return _func_hashes(node)[1:]
+        if isinstance(node, ast.ClassDef):
+            return _class_hashes(node)[1:]
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            h = sha(_dump(node.value))
+            return h, h
+    return None
 
 
 def _calls_in(node: ast.AST) -> list[str]:
@@ -181,6 +309,7 @@ def scan_python(rel: str, text: str) -> FileInfo:
             key=f"{rel}::{qualname}", name=qualname.split(".")[-1], qualname=qualname, kind=kind, path=rel,
             start=start, end=getattr(node, "end_lineno", start), signature=sig, sig_hash=sig_h,
             body_hash=body_h, source=_segment(lines, node), calls=calls,
+            types_hash=_types_hash(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "",
         ))
 
     for node in tree.body:

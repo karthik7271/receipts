@@ -85,10 +85,12 @@ def advice_for(facts: list[dict]) -> str:
 def sync_summary(report, p: Painter, *, max_changes: int = 12) -> str:
     if not report.sync_id:
         return p.dim("Code graph already up to date.") + _transitions(report, p)
-    sym_changes = [c for c in report.changes if c["kind"] != "file"]
+    order = {"moved": 0, "signature": 1, "deleted": 2, "types": 3, "body": 4}
+    sym_changes = sorted((c for c in report.changes if c["kind"] != "file"),
+                         key=lambda c: (order.get(c["kind"], 9), "test" in c.get("key", "")))
     lines = [f"{p.bold(report.sync_id)} scanned {report.files_scanned} files, "
              f"{len(report.files_changed)} changed, {len(sym_changes)} symbol changes"]
-    icons = {"body": "~", "signature": "Δ", "deleted": "−", "moved": "→"}
+    icons = {"body": "~", "signature": "Δ", "deleted": "−", "moved": "→", "types": "·"}
     for c in sym_changes[:max_changes]:
         lines.append(f"  {p(icons.get(c['kind'], '·'), '36')} {c['detail']}")
     if len(sym_changes) > max_changes:

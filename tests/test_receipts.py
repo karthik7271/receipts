@@ -67,8 +67,39 @@ def test_rename_keeps_body_hash_and_signature_change_is_detected():
     a = scan_python("m.py", "def old_name(x: int) -> int:\n    y = x * 2\n    return y + 1\n")
     b = scan_python("n.py", "def new_name(x: int) -> int:\n    y = x * 2\n    return y + 1\n")
     c = scan_python("m.py", "def old_name(x: float) -> int:\n    y = x * 2\n    return y + 1\n")
+    d = scan_python("m.py", "def old_name(value: int) -> int:\n    y = value * 2\n    return y + 1\n")
     assert a.symbols[0].body_hash == b.symbols[0].body_hash
-    assert a.symbols[0].sig_hash != c.symbols[0].sig_hash
+    assert a.symbols[0].types_hash != c.symbols[0].types_hash   # type change: tracked separately
+    assert a.symbols[0].sig_hash != d.symbols[0].sig_hash       # parameter renamed: signature change
+
+
+def test_equivalent_type_hints_hash_the_same():
+    old = "import typing as t\ndef f(x: t.Optional[str], y: t.Dict[str, int]) -> 't.Union[int, str]':\n    return 1\n"
+    new = "def f(x: str | None, y: dict[str, int]) -> str | int:\n    '''now documented'''\n    return 1\n"
+    real = "def f(x: int | None, y: dict[str, int]) -> str | int:\n    return 1\n"
+    h = lambda src: [s for s in scan_python("m.py", src).symbols if s.name == "f"][0]
+    assert (h(old).body_hash, h(old).sig_hash, h(old).types_hash) == (h(new).body_hash, h(new).sig_hash, h(new).types_hash)
+    # a real type change is tracked (it can make dependants suspect) but doesn't touch behaviour or shape
+    assert h(real).types_hash != h(new).types_hash
+    assert (h(real).body_hash, h(real).sig_hash) == (h(new).body_hash, h(new).sig_hash)
+    added = "def f(x: str | None, y: dict[str, int], z: int = 0) -> str | int:\n    return 1\n"
+    assert h(added).sig_hash != h(new).sig_hash  # a new parameter is a real signature change
+
+
+def test_old_stores_are_migrated_without_false_alarms(shop):
+    repo, store = shop
+    remember_day1(repo, store)
+    with Store(store) as s:  # pretend the store was built by an older hashing scheme
+        s.q("MATCH (s:Symbol) SET s.body_hash = 'old-' + s.body_hash, s.sig_hash = 'old-' + s.sig_hash")
+        s.q("MATCH (:Fact)-[c:CITES {mode: 'symbol'}]->() SET c.hash = 'old-' + c.hash, c.sig_hash = 'old-' + c.sig_hash")
+        s.q("MATCH (m:Meta {key: 'receipts'}) SET m.hash_version = 1")
+    with Store(store) as s:
+        sync(s, repo)
+    assert set(statuses(store).values()) == {"fresh"}
+    apply_v2(repo)
+    with Store(store) as s:
+        sync(s, repo)
+    assert statuses(store)["M1"] == "stale" and statuses(store)["M7"] == "fresh"
 
 
 def test_quote_matching_respects_token_boundaries():
