@@ -15,8 +15,12 @@ BADGE = {
 
 
 def use_color(stream=None) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
     stream = stream or sys.stdout
-    return stream.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+    return stream.isatty() and os.environ.get("TERM") != "dumb"
 
 
 class Painter:

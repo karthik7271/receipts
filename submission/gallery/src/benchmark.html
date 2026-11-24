@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Receipts benchmark</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #fbfcfa; --ink: #1e2a2b; --graphite: #5f6b66; --faint: #8a948f; --rule: #e1e7de; --rule-strong: #c3cdbf;
+  /* categorical, validated with dataviz/validate_palette.js (light, surface #fbfcfa): all checks pass */
+  --s-file: #c27b2a; --s-text: #3f6cc9; --s-receipts: #2b8c5a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1800px; height: 1200px; overflow: hidden; background: var(--paper); }
+body { font-family: "Instrument Sans", system-ui, sans-serif; color: var(--ink); padding: 84px 120px 0; -webkit-font-smoothing: antialiased; }
+h1 { font-size: 56px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 16px; font-weight: 700; max-width: 26ch; }
+.sub { font-size: 26px; line-height: 1.45; color: var(--graphite); margin: 0 0 36px; max-width: 62ch; }
+.legend { display: flex; gap: 36px; font-size: 24px; color: var(--graphite); margin: 0 0 26px; }
+.legend span { display: inline-flex; align-items: center; gap: 10px; }
+.legend i { width: 22px; height: 14px; border-radius: 3px; display: inline-block; }
+.legend b { color: var(--ink); font-weight: 600; }
+.chart { display: grid; grid-template-columns: 300px 1fr 290px; column-gap: 28px; position: relative; }
+.axis { grid-column: 2; position: relative; height: 30px; font: 400 19px "Spline Sans Mono", monospace; color: var(--faint); }
+.axis span { position: absolute; transform: translateX(-50%); }
+.group { display: contents; }
+.label { grid-column: 1; align-self: center; font-size: 25px; font-weight: 600; line-height: 1.25; padding: 16px 0; }
+.label small { display: block; font-weight: 400; color: var(--graphite); font-size: 21px; }
+.bars { grid-column: 2; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 22px 0;
+        background: repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 25%); background-size: 100% 100%;
+        border-left: 1.5px solid var(--rule-strong); }
+.bar { height: 24px; border-radius: 0 4px 4px 0; position: relative; }
+.bar.receipts { height: 28px; }
+.bar .v { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); font: 600 21px "Instrument Sans", sans-serif; color: var(--ink); white-space: nowrap; }
+.note { grid-column: 3; align-self: center; font-size: 21px; line-height: 1.35; color: var(--graphite); padding: 16px 0; }
+.sep { grid-column: 1 / -1; height: 1px; background: var(--rule); }
+.foot { margin: 40px 0 0; font-size: 21px; color: var(--faint); }
+</style>
+</head>
+<body>
+<h1>How many memories get flagged after a real release</h1>
+<p class="sub">Every function and class in the older release, as if a memory cited it. Receipts flags far fewer, and still catches every change to what the cited code does.</p>
+<div class="legend">
+  <span><i style="background:var(--s-file)"></i>Memory cites the file</span>
+  <span><i style="background:var(--s-text)"></i>Memory cites the exact text</span>
+  <span><i style="background:var(--s-receipts)"></i><b>Receipts</b></span>
+</div>
+<div class="chart" id="chart"></div>
+<p class="foot">Measured with benchmarks/history.py, which replays each release through the Relate pipeline. Flask 2.2.0 to 3.1.0, Requests 2.28.0 to 2.32.0.</p>
+<script>
+const rows = [
+  { name: "Flask", rel: "2.2 → 2.3", file: 100, text: 55, rec: 19, note: "142 cosmetic edits ignored" },
+  { name: "Flask", rel: "2.3 → 3.0", file: 75, text: 35, rec: 10, note: "79 renames and moves followed" },
+  { name: "Flask", rel: "3.0 → 3.1", file: 100, text: 43, rec: 16, note: "99 cosmetic edits ignored" },
+  { name: "Requests", rel: "2.28 → 2.31", file: 58, text: 5, rec: 4, note: "3 cosmetic edits ignored" },
+  { name: "Requests", rel: "2.31 → 2.32", file: 100, text: 98, rec: 13, note: "250 moves followed into src/" },
+];
+const el = document.getElementById("chart");
+el.insertAdjacentHTML("beforeend", `<div></div><div class="axis">${[0, 25, 50, 75, 100].map(v => `<span style="left:${v}%">${v}%</span>`).join("")}</div><div></div>`);
+rows.forEach((r, i) => {
+  el.insertAdjacentHTML("beforeend", `
+    <div class="label">${r.name}<small>${r.rel}</small></div>
+    <div class="bars">
+      <div class="bar" style="width:${r.file}%;background:var(--s-file)"></div>
+      <div class="bar" style="width:${r.text}%;background:var(--s-text)"></div>
+      <div class="bar receipts" style="width:${r.rec}%;background:var(--s-receipts)"><span class="v">${r.rec}%</span></div>
+    </div>
+    <div class="note">${r.note}</div>
+    ${i < rows.length - 1 ? '<div class="sep"></div>' : ""}`);
+});
+</script>
+</body>
+</html>

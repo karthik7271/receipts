@@ -1,0 +1,44 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:1800px;height:1200px;overflow:hidden}
+body{background:#e5ebe2;font-family:"Instrument Sans",system-ui,sans-serif;color:#1e2a2b;-webkit-font-smoothing:antialiased;
+  display:grid;grid-template-rows:auto 1fr;padding:60px 110px 60px}
+h1{font-size:44px;letter-spacing:-.02em;margin:0 0 10px;font-weight:700}
+p{font-size:23px;color:#5f6b66;margin:0 0 28px;max-width:72ch;line-height:1.45}
+.win{min-height:0;background:#121917;border-radius:16px;box-shadow:0 30px 60px -30px rgba(18,25,23,.7);overflow:hidden;display:flex;flex-direction:column}
+.bar{height:46px;display:flex;align-items:center;gap:10px;padding:0 22px;color:#7d8a85;font:500 18px "Spline Sans Mono",monospace;border-bottom:1px solid #26302d}
+pre{margin:0;padding:22px 30px;color:#dfe7e2;font:400 18px/1.42 "Spline Sans Mono",monospace;white-space:pre}
+</style></head><body>
+<header><h1>One refactor, one sync: Relate decides what is still true</h1>
+<p>A teammate switches Money to Decimal, renames and moves a discount function, and raises tax. On the next session start, Receipts syncs the code graph and the memory statuses follow the graph.</p></header>
+<div class="win"><div class="bar">receipts demo</div><pre><span style="color:#c79bf2;font-weight:600">▶ </span><span style="font-weight:600">Next session starts (SessionStart hook runs `receipts sync`). Relate propagates the change:</span>
+  <span style="font-weight:600">S2</span> scanned 10 files, 7 changed, 13 symbol changes
+    <span style="color:#6fc3c9">→</span> MAX_DISCOUNT_PERCENT moved to tinyshop/promotions.py::MAX_DISCOUNT_PERCENT
+    <span style="color:#6fc3c9">→</span> apply_discount moved to tinyshop/promotions.py::discount_for
+    <span style="color:#6fc3c9">Δ</span> Money.__init__: signature is now __init__(self, amount: Decimal | str)
+    <span style="color:#6fc3c9">·</span> Money.times: type hints are now times(self, factor: Decimal | str) -&gt; &#x27;Money&#x27;
+    <span style="color:#6fc3c9">~</span> total: implementation changed
+    <span style="color:#6fc3c9">~</span> Money: implementation changed
+    <span style="color:#6fc3c9">~</span> Money.from_dollars: implementation changed
+    <span style="color:#6fc3c9">~</span> Money.__add__: implementation changed
+    <span style="color:#6fc3c9">~</span> Money.__eq__: implementation changed
+    <span style="color:#6fc3c9">~</span> Money.times: implementation changed
+    <span style="color:#6fc3c9">~</span> Money.__str__: implementation changed
+  <span style="opacity:.62">  … 1 more</span>
+  <span style="font-weight:600">Memory status changes:</span>
+    <span style="font-weight:600">M1</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#ff7b72;font-weight:600">✗ STALE</span>
+        <span style="opacity:.62">Money changed</span>
+    <span style="font-weight:600">M2</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#e8b04a;font-weight:600">? SUSPECT</span>
+        <span style="opacity:.62">discount_for depends on Money.times, whose type hints changed</span>
+    <span style="font-weight:600">M3</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#ff7b72;font-weight:600">✗ STALE</span>
+        <span style="opacity:.62">quoted text is gone from config/settings.yaml</span>
+    <span style="font-weight:600">M4</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#e8b04a;font-weight:600">? SUSPECT</span>
+        <span style="opacity:.62">refund_amount depends on Money.times, whose type hints changed</span>
+        <span style="opacity:.62">builds on M1 (stale)</span>
+    <span style="font-weight:600">M5</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#ff7b72;font-weight:600">✗ STALE</span>
+        <span style="opacity:.62">total changed</span>
+        <span style="opacity:.62">builds on M3 (stale), M2 (suspect)</span>
+    <span style="font-weight:600">M6</span> <span style="color:#5fcf8a">✓ fresh</span> → <span style="color:#ff7b72;font-weight:600">✗ STALE</span>
+        <span style="opacity:.62">Money.__str__ changed</span></pre></div>
+</body></html>
