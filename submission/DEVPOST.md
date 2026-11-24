@@ -9,6 +9,15 @@
 - Live memory graph (Relate in your browser): https://receipts-memory.vercel.app/ (mirror: https://karthik7271.github.io/receipts/)
 - Try it: `uvx --from git+https://github.com/karthik7271/receipts receipts demo`
 
+**Additional info (for judges)**
+- Public GitHub repo URL: https://github.com/karthik7271/receipts
+- Relate mode: Single file
+- Path to the persistent store: `examples/tinyshop/.receipts/memory.rl` (also `examples/live-flask/.receipts/memory.rl`
+  and `examples/live-claude-code/tinyshop/.receipts/memory.rl`)
+- Why this mode: Memory has to outlive every agent session, so each repository keeps one durable `.receipts/memory.rl`
+  that hooks and MCP calls open in milliseconds with no server, and that a team can commit to share memory alongside
+  the code.
+
 ---
 
 ## Inspiration
