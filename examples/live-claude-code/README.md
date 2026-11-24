@@ -31,7 +31,7 @@ receipts --repo examples/live-claude-code/tinyshop list
 receipts --repo examples/live-claude-code/tinyshop why M12
 ```
 
-or in the browser: <https://karthik7271.github.io/receipts/?data=live-session.cypher>
+or in the browser: <https://receipts-memory.vercel.app/?data=live-session.cypher>
 
 ---
 

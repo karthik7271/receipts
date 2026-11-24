@@ -4,10 +4,10 @@
 [Relate](https://github.com/relatedb/relate), Neo4j's embedded graph database, keeps those receipts linked to the
 code and works out which memories stopped being true when the code changes.
 
-**[Open the live memory graph](https://karthik7271.github.io/receipts/)** (Relate runs in your browser tab as
-WebAssembly) · Try it locally in one command: `uvx --from git+https://github.com/karthik7271/receipts receipts demo`
+**[Open the live memory graph](https://receipts-memory.vercel.app/)** (Relate runs in your browser tab as
+WebAssembly; mirror on [GitHub Pages](https://karthik7271.github.io/receipts/)) · Try it locally in one command: `uvx --from git+https://github.com/karthik7271/receipts receipts demo`
 
-[![The Receipts viewer: a stale memory, why it was flagged, and the diff that broke it](assets/viewer.png)](https://karthik7271.github.io/receipts/?m=M1)
+[![The Receipts viewer: a stale memory, why it was flagged, and the diff that broke it](assets/viewer.png)](https://receipts-memory.vercel.app/?m=M1)
 
 ## The problem
 

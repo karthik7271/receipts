@@ -6,7 +6,7 @@
 
 **Links**
 - Code: https://github.com/karthik7271/receipts
-- Live memory graph (Relate in your browser): https://karthik7271.github.io/receipts/ (and the Vercel URL once deployed)
+- Live memory graph (Relate in your browser): https://receipts-memory.vercel.app/ (mirror: https://karthik7271.github.io/receipts/)
 - Try it: `uvx --from git+https://github.com/karthik7271/receipts receipts demo`
 
 ---

@@ -2,9 +2,9 @@
 
 - [x] Public GitHub repo with topic `relate`: https://github.com/karthik7271/receipts
 - [x] Persistent Relate stores committed in `examples/` (tinyshop demo, live Flask, live tinyshop)
-- [x] Live viewer on GitHub Pages: https://karthik7271.github.io/receipts/
+- [x] Mirror on GitHub Pages: https://karthik7271.github.io/receipts/
 - [x] One-line demo from GitHub verified: `uvx --from git+https://github.com/karthik7271/receipts receipts demo`
-- [ ] Vercel: run `vercel login` once, then `scripts/deploy_vercel.sh` (redeploy after any change to `docs/`)
+- [x] Live on Vercel: https://receipts-memory.vercel.app/ (run `scripts/deploy_vercel.sh` after any change to `docs/`)
 - [ ] Read the official rules at https://relate.devpost.com/rules (confirm the requirements and judging weights)
 - [ ] Record the 1–2 minute video ([VIDEO_SCRIPT.md](VIDEO_SCRIPT.md)), upload it, and add the link to README.md
 - [ ] Devpost: paste [DEVPOST.md](DEVPOST.md), and add the repo, live link and video, plus 3–4 screenshots
