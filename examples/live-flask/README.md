@@ -62,3 +62,7 @@ Answer to the user:
 
 (6 turns, $0.22)
 
+
+---
+
+The store contains code snippets from [Flask](https://github.com/pallets/flask), © Pallets, used under the BSD-3-Clause license.
