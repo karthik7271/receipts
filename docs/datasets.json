@@ -1,3 +1,1 @@
-[{"file": "before-repair.cypher", "label": "Demo: after the refactor (before repair)"},
- {"file": "after-repair.cypher", "label": "Demo: after the agent repaired its memory"},
- {"file": "live-session.cypher", "label": "Live: memories written by Claude Code via MCP"}]
+[{"file": "before-repair.cypher", "label": "Demo: after a refactor, before repair"}, {"file": "live-flask.cypher", "label": "Live: Claude Code on Flask, unprompted"}, {"file": "after-repair.cypher", "label": "Demo: after the agent repaired its memory"}, {"file": "live-session.cypher", "label": "Live: Claude Code on tinyshop"}]

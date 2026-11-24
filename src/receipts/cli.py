@@ -247,7 +247,9 @@ def cmd_install(a, p):
     def add_hooks(d):
         hooks = d.setdefault("hooks", {})
         for event, matcher, kind in (("SessionStart", None, "session-start"),
-                                     ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|Read", "post-tool-use")):
+                                     ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Grep|mcp__receipts__.*",
+                                      "post-tool-use"),
+                                     ("Stop", None, "stop")):
             groups = [g for g in hooks.get(event, [])
                       if not any("receipts" in h.get("command", "") and " hook " in h.get("command", "")
                                  for h in g.get("hooks", []))]
@@ -259,7 +261,7 @@ def cmd_install(a, p):
 
     gi = repo / ".gitignore"
     lines = gi.read_text().splitlines() if gi.exists() else []
-    for entry in (".receipts/*.lock", ".receipts/hook.log"):
+    for entry in (".receipts/*.lock", ".receipts/hook.log", ".receipts/sessions/"):
         if entry not in lines:
             lines.append(entry)
     gi.write_text("\n".join(lines) + "\n")
@@ -269,7 +271,7 @@ def cmd_install(a, p):
     print(p.bold("Receipts is wired into Claude Code for ") + str(repo))
     print(f"  {p('✓', '32')} MCP server  → .mcp.json  (tools: recall, remember, verify, reaffirm, revise, retract, "
           "impact, memory_status)")
-    print(f"  {p('✓', '32')} hooks       → .claude/settings.json  (SessionStart, PostToolUse)")
+    print(f"  {p('✓', '32')} hooks       → .claude/settings.json  (SessionStart, PostToolUse, Stop)")
     print(f"  {p('✓', '32')} code graph  → {a.store}  ({rep.files_scanned} files scanned)")
     print(p.dim("  Commit .receipts/memory.rl to share memory with your team, or add it to .gitignore to keep it local."))
     print(p.dim("  Start `claude` in this repo and approve the 'receipts' MCP server when asked."))
@@ -376,7 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("install", help="wire Receipts into Claude Code for this repo (MCP + hooks)")
     s.set_defaults(fn=cmd_install)
     s = sub.add_parser("hook", help="(called by Claude Code) run a hook")
-    s.add_argument("kind", choices=["session-start", "post-tool-use"])
+    s.add_argument("kind", choices=["session-start", "post-tool-use", "stop"])
     s.set_defaults(fn=cmd_hook)
     s = sub.add_parser("mcp", help="(called by MCP hosts) serve the memory tools over stdio")
     s.set_defaults(fn=cmd_mcp)

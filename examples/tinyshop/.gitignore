@@ -1,3 +1,4 @@
 .receipts/*.lock
 .receipts/hook.log
+.receipts/sessions/
 __pycache__/

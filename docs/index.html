@@ -491,6 +491,7 @@ function renderGraph() {
   });
   cy.on("tap", "node", (e) => { const d = e.target.data(); d.kind === "fact" ? select(d.id) : showSymbol(d.id); });
   cy.on("tap", (e) => { if (e.target === cy) cy.elements().removeClass("faded focus"); });
+  if (cy.zoom() > 1.25) { cy.zoom(1.25); cy.center(); }   // a small graph shouldn't fill the page with three huge nodes
   cy.on("viewport", syncPaper);
   syncPaper();
   if (selected) focusNode(selected);

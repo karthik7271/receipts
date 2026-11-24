@@ -6,3 +6,4 @@ dist/
 receipts-demo/
 .receipts/*.lock
 .receipts/hook.log
+.receipts/sessions/

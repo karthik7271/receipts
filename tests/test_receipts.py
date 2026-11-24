@@ -330,6 +330,20 @@ def test_heal_applies_verdicts_parents_first(shop):
     assert {r["outcome"] for r in results} >= {"revised", "reaffirmed", "retracted"}
 
 
+def test_stop_hook_asks_once_after_real_work(shop):
+    from receipts.hooks import stop
+    repo, store = shop
+    read = lambda sid: post_tool_use({"session_id": sid, "tool_name": "Read",  # noqa: E731
+                                      "tool_input": {"file_path": str(repo / "tinyshop/money.py")}}, repo, store)
+    assert stop({"session_id": "a"}, repo, store) == ""          # did nothing: no nudge
+    read("a"); read("a")
+    assert "remember" in stop({"session_id": "a"}, repo, store)  # studied code, saved nothing: one nudge
+    assert stop({"session_id": "a"}, repo, store) == ""          # never twice
+    read("b"); read("b")
+    post_tool_use({"session_id": "b", "tool_name": "mcp__receipts__remember", "tool_input": {}}, repo, store)
+    assert stop({"session_id": "b"}, repo, store) == ""          # already saved something
+
+
 def test_export_replays_into_relate(shop):
     import relate
     repo, store = shop

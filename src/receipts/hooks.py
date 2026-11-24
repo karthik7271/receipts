@@ -40,6 +40,67 @@ def _emit(event: str, text: str) -> None:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 
 
+# --------------------------------------------------------------------------- #
+# Per-session activity, so the Stop hook can tell whether memory was used
+# --------------------------------------------------------------------------- #
+
+NUDGE_AFTER_READS = 2
+
+
+def _session_file(store_path: Path, session_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id or "unknown")[:80]
+    return store_path.parent / "sessions" / f"{safe}.json"
+
+
+def _load_session(store_path: Path, session_id: str) -> dict:
+    try:
+        return json.loads(_session_file(store_path, session_id).read_text())
+    except (OSError, ValueError):
+        return {"reads": 0, "edits": 0, "remembered": 0, "recalled": 0, "nudged": False}
+
+
+def _save_session(store_path: Path, session_id: str, state: dict) -> None:
+    f = _session_file(store_path, session_id)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(state))
+
+
+def _track(payload: dict, store_path: Path) -> None:
+    tool = payload.get("tool_name", "")
+    sid = payload.get("session_id", "")
+    if not sid:
+        return
+    state = _load_session(store_path, sid)
+    if tool in ("Read", "Grep"):
+        state["reads"] += 1
+    elif tool in EDIT_TOOLS:
+        state["edits"] += 1
+    elif tool.endswith("__remember") or tool.endswith("__revise") or tool.endswith("__reaffirm"):
+        state["remembered"] += 1
+    elif tool.endswith("__recall"):
+        state["recalled"] += 1
+    else:
+        return
+    _save_session(store_path, sid, state)
+
+
+def stop(payload: dict, repo: Path, store_path: Path) -> str:
+    """Once per session: an agent that studied or changed code but saved nothing is asked
+    whether anything is worth remembering. Returns the reason, or '' to let it stop."""
+    sid = payload.get("session_id", "")
+    if payload.get("stop_hook_active") or not sid or not store_path.exists():
+        return ""
+    state = _load_session(store_path, sid)
+    if state["nudged"] or state["remembered"] or (state["reads"] < NUDGE_AFTER_READS and not state["edits"]):
+        return ""
+    state["nudged"] = True
+    _save_session(store_path, sid, state)
+    return ("Before you finish: Receipts is this repo's long-term memory, and nothing was saved this session. "
+            "If you learned something durable that a future session would need (an invariant, convention, "
+            "gotcha or decision that isn't obvious from one read of one file), save it now with `remember`, "
+            "citing the narrowest code that proves it. Save at most 3. If nothing qualifies, just finish.")
+
+
 def _fmt(f: dict) -> str:
     line = f"- {f['id']} [{f['status'].upper()}] {f['text']}"
     reasons = f.get("reasons") or []
@@ -86,6 +147,12 @@ def _rel(repo: Path, path: str) -> str | None:
 def post_tool_use(payload: dict, repo: Path, store_path: Path) -> str:
     tool = payload.get("tool_name", "")
     tin = payload.get("tool_input") or {}
+    try:
+        _track(payload, store_path)
+    except OSError:
+        pass
+    if tool.startswith("mcp__"):
+        return ""
 
     if tool in EDIT_TOOLS:
         rel = _rel(repo, tin.get("file_path") or tin.get("notebook_path") or "")
@@ -142,6 +209,10 @@ def run(kind: str) -> int:
             _emit("SessionStart", session_start(payload, repo, store_path))
         elif kind == "post-tool-use":
             _emit("PostToolUse", post_tool_use(payload, repo, store_path))
+        elif kind == "stop":
+            reason = stop(payload, repo, store_path)
+            if reason:
+                print(json.dumps({"decision": "block", "reason": reason}))
         else:
             raise ValueError(f"unknown hook {kind}")
     except Exception:
