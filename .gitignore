@@ -9,3 +9,5 @@ receipts-demo/
 .receipts/sessions/
 docs/.vercel/
 .vercel/
+.vercel
+.env*
