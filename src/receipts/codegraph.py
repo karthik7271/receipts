@@ -62,6 +62,8 @@ class FileInfo:
     text: str
     symbols: list[SymbolInfo] = field(default_factory=list)
     imports: list[str] = field(default_factory=list)   # dotted module names (python) or relative specs (js)
+    size: int = 0       # bytes on disk, with mtime a cheap "did this file change?" check
+    mtime: int = 0      # st_mtime_ns
 
 
 # --------------------------------------------------------------------------- #
@@ -252,10 +254,25 @@ def scan_js(rel: str, text: str, lang: str) -> FileInfo:
 # --------------------------------------------------------------------------- #
 
 
+def stat_file(root: Path, rel: str) -> tuple[int, int] | None:
+    """(size, mtime_ns), or None if the file is gone or too big to track."""
+    try:
+        st = (root / rel).stat()
+    except OSError:
+        return None
+    if st.st_size > MAX_BYTES:
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
 def scan_file(root: Path, rel: str) -> FileInfo | None:
     text = read_text(root, rel)
     if text is None:
         return None
+    return scan_text(rel, text)
+
+
+def scan_text(rel: str, text: str) -> FileInfo:
     lang = CODE_EXT.get(Path(rel).suffix.lower())
     if lang == "python":
         return scan_python(rel, text)

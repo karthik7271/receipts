@@ -21,10 +21,23 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .codegraph import FileInfo, SymbolInfo, list_files, module_index, resolve_imports, scan_repo
+from .codegraph import (FileInfo, SymbolInfo, list_files, module_index, read_text, resolve_imports, scan_text, sha,
+                        stat_file)
 from .store import Store, now_iso
 
 SNAPSHOT_MAX = 4000
+BATCH = 500
+
+
+def _batched(store: Store, cypher: str, rows: list, *, size: int | None = None, **params) -> None:
+    """Run an UNWIND statement in chunks, committing between chunks of a large job."""
+    if not rows:
+        return
+    size = min(size or BATCH, BATCH)
+    for i in range(0, len(rows), size):
+        store.q(cypher, rows=rows[i:i + size], **params)
+        if len(rows) > size:
+            store.checkpoint()
 
 
 @dataclass
@@ -69,20 +82,43 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
     """
     report = SyncReport()
     stored = {r["path"]: r for r in store.q(
-        "MATCH (f:File) RETURN f.path AS path, f.hash AS hash, f.deleted AS deleted")}
+        "MATCH (f:File) RETURN f.path AS path, f.hash AS hash, f.deleted AS deleted, f.size AS size, "
+        "f.mtime AS mtime")}
 
     if only is None:
-        current_paths = list_files(root)
-        scanned = scan_repo(root, current_paths)
-        removed = [p for p, r in stored.items() if not r["deleted"] and p not in scanned]
+        candidates = list_files(root)
+        present = set(candidates)
+        removed = [p for p, r in stored.items() if not r["deleted"] and p not in present]
     else:
         wanted = sorted({p for p in only if p})
-        scanned = scan_repo(root, [p for p in wanted if (root / p).is_file()])
-        removed = [p for p in wanted if p not in scanned and p in stored and not stored[p]["deleted"]]
-    report.files_scanned = len(scanned)
+        candidates = [p for p in wanted if (root / p).is_file()]
+        removed = [p for p in wanted if p not in candidates and p in stored and not stored[p]["deleted"]]
+    report.files_scanned = len(candidates)
 
-    changed = {p: fi for p, fi in scanned.items()
-               if p not in stored or stored[p]["hash"] != fi.hash or stored[p]["deleted"]}
+    # Cheap checks first, so a sync of a large unchanged repo costs a stat() per
+    # file: same size and mtime means unchanged; same content hash means
+    # unchanged (only the timestamp moved). Only real changes get parsed.
+    changed: dict[str, FileInfo] = {}
+    touched_only: list[dict] = []
+    for rel in candidates:
+        st = stat_file(root, rel)
+        if st is None:
+            continue
+        old = stored.get(rel)
+        live = old is not None and not old["deleted"]
+        if live and old["size"] == st[0] and old["mtime"] == st[1]:
+            continue
+        text = read_text(root, rel)
+        if text is None:
+            continue
+        if live and old["hash"] == sha(text):
+            touched_only.append({"path": rel, "size": st[0], "mtime": st[1]})
+            continue
+        fi = scan_text(rel, text)
+        fi.size, fi.mtime = st
+        changed[rel] = fi
+    _batched(store, "UNWIND $rows AS r MATCH (f:File {path: r.path}) SET f.size = r.size, f.mtime = r.mtime",
+             touched_only)
     if not changed and not removed:
         if recompute:
             report.transitions = recompute_status(store)
@@ -136,53 +172,60 @@ def sync(store: Store, root: Path, only: list[str] | None = None, *, recompute: 
         else:
             changes.append({"kind": "deleted", "key": k, "detail": f"{old['qualname']} was deleted"})
     report.moved = moved
+    # File-level changes only matter for files we knew before (a first scan is not a change).
     for p in changed:
-        changes.append({"kind": "file", "path": p, "detail": f"{p} changed"})
+        if p in stored:
+            changes.append({"kind": "file", "path": p, "detail": f"{p} changed"})
     for p in removed:
         changes.append({"kind": "file", "path": p, "detail": f"{p} was deleted"})
 
     # ---- phase A: upsert files, symbols, changes ---------------------------- #
-    store.q(
-        "UNWIND $rows AS r MERGE (f:File {path: r.path}) "
-        "SET f.hash = r.hash, f.lang = r.lang, f.lines = r.lines, f.deleted = false, f.tick = $t, f.updated = $at",
-        rows=[{"path": fi.path, "hash": fi.hash, "lang": fi.lang, "lines": fi.lines} for fi in changed.values()],
-        t=t, at=at)
+    # Written in committed batches: Relate caps a single commit at 64 MiB, and
+    # a large repository's first scan is far bigger than that.
+    _batched(store, "UNWIND $rows AS r MERGE (f:File {path: r.path}) ON CREATE SET f.hash = '', f.deleted = false",
+             [{"path": p} for p in changed])
     if removed:
         store.q("MATCH (f:File) WHERE f.path IN $paths SET f.deleted = true, f.tick = $t", paths=removed, t=t)
-    if new_syms:
-        store.q(
-            "UNWIND $rows AS r MERGE (s:Symbol {key: r.key}) "
-            "SET s.name = r.name, s.qualname = r.qualname, s.kind = r.kind, s.path = r.path, "
-            "    s.start = r.start, s.end = r.end, s.signature = r.signature, s.sig_hash = r.sig_hash, "
-            "    s.body_hash = r.body_hash, s.source = r.source, s.deleted = false, s.tick = $t "
-            "WITH s, r MATCH (f:File {path: r.path}) MERGE (f)-[:DEFINES]->(s)",
-            rows=[{"key": s.key, "name": s.name, "qualname": s.qualname, "kind": s.kind, "path": s.path,
-                   "start": s.start, "end": s.end, "signature": s.signature, "sig_hash": s.sig_hash,
-                   "body_hash": s.body_hash, "source": s.source[:SNAPSHOT_MAX]} for s in new_syms.values()],
-            t=t)
+    _batched(store,
+             "UNWIND $rows AS r MERGE (s:Symbol {key: r.key}) "
+             "SET s.name = r.name, s.qualname = r.qualname, s.kind = r.kind, s.path = r.path, "
+             "    s.start = r.start, s.end = r.end, s.signature = r.signature, s.sig_hash = r.sig_hash, "
+             "    s.body_hash = r.body_hash, s.source = r.source, s.deleted = false, s.tick = $t "
+             "WITH s, r MATCH (f:File {path: r.path}) MERGE (f)-[:DEFINES]->(s)",
+             [{"key": s.key, "name": s.name, "qualname": s.qualname, "kind": s.kind, "path": s.path,
+               "start": s.start, "end": s.end, "signature": s.signature, "sig_hash": s.sig_hash,
+               "body_hash": s.body_hash, "source": s.source[:SNAPSHOT_MAX]} for s in new_syms.values()],
+             size=200, t=t)
     if vanished:
-        store.q("MATCH (s:Symbol) WHERE s.key IN $keys SET s.deleted = true, s.deleted_tick = $t",
-                keys=vanished, t=t)
+        _batched(store, "UNWIND $rows AS k MATCH (s:Symbol {key: k}) SET s.deleted = true, s.deleted_tick = $t",
+                 vanished, t=t)
     if moved:
         store.q("UNWIND $pairs AS p MATCH (a:Symbol {key: p[0]}), (b:Symbol {key: p[1]}) MERGE (a)-[:MOVED_TO]->(b)",
                 pairs=[list(m) for m in moved])
 
-    change_rows = []
-    for c in changes:
-        cid = store.next_id("next_change", "C")
-        change_rows.append({**c, "id": cid})
+    first = store.next_ids("next_change", len(changes))
+    change_rows = [{**c, "id": f"C{first + i}"} for i, c in enumerate(changes)]
     report.changes = change_rows
-    store.q(
-        "UNWIND $rows AS r CREATE (c:Change {id: r.id, kind: r.kind, detail: r.detail, at: $at, tick: $t, "
-        "commit: $commit, sync: $sync}) "
-        "WITH c, r MATCH (s:Sync {id: $sync}) CREATE (s)-[:RECORDED]->(c)",
-        rows=change_rows, at=at, t=t, commit=commit, sync=report.sync_id)
-    store.q("UNWIND $rows AS r MATCH (c:Change {id: r.id}), (s:Symbol {key: r.key}) CREATE (c)-[:ON]->(s)",
-            rows=[r for r in change_rows if r.get("key")])
-    store.q("UNWIND $rows AS r MATCH (c:Change {id: r.id}), (f:File {path: r.path}) CREATE (c)-[:ON]->(f)",
-            rows=[r for r in change_rows if r.get("path")])
+    _batched(store,
+             "UNWIND $rows AS r CREATE (c:Change {id: r.id, kind: r.kind, detail: r.detail, at: $at, tick: $t, "
+             "commit: $commit, sync: $sync}) "
+             "WITH c, r MATCH (s:Sync {id: $sync}) CREATE (s)-[:RECORDED]->(c)",
+             change_rows, at=at, t=t, commit=commit, sync=report.sync_id)
+    _batched(store, "UNWIND $rows AS r MATCH (c:Change {id: r.id}), (s:Symbol {key: r.key}) CREATE (c)-[:ON]->(s)",
+             [r for r in change_rows if r.get("key")])
+    _batched(store, "UNWIND $rows AS r MATCH (c:Change {id: r.id}), (f:File {path: r.path}) CREATE (c)-[:ON]->(f)",
+             [r for r in change_rows if r.get("path")])
 
     _check_quotes(store, changed, removed)
+
+    # File fingerprints go last: if anything above fails, the next sync sees
+    # the old fingerprint and simply redoes these files.
+    _batched(store,
+             "UNWIND $rows AS r MATCH (f:File {path: r.path}) "
+             "SET f.hash = r.hash, f.lang = r.lang, f.lines = r.lines, f.size = r.size, f.mtime = r.mtime, "
+             "    f.deleted = false, f.tick = $t, f.updated = $at",
+             [{"path": fi.path, "hash": fi.hash, "lang": fi.lang, "lines": fi.lines, "size": fi.size,
+               "mtime": fi.mtime} for fi in changed.values()], t=t, at=at)
 
     # Relate 1.0.2 panics when a statement deletes something created earlier
     # in the same open transaction, so commit before the delete phase.
@@ -266,8 +309,8 @@ def find_quote(text: str, quote: str) -> int | None:
 
 def _rebuild_edges(store: Store, changed: dict[str, FileInfo], removed: list[str], vanished: list[str]) -> None:
     paths = sorted([*changed, *removed])
-    store.q("MATCH (s:Symbol)-[r:CALLS]->() WHERE s.path IN $paths DELETE r", paths=paths)
-    store.q("MATCH (f:File)-[r:IMPORTS]->() WHERE f.path IN $paths DELETE r", paths=paths)
+    _batched(store, "MATCH (s:Symbol)-[r:CALLS]->() WHERE s.path IN $rows DELETE r", paths)
+    _batched(store, "MATCH (f:File)-[r:IMPORTS]->() WHERE f.path IN $rows DELETE r", paths)
     if not changed:
         return
 
@@ -280,8 +323,8 @@ def _rebuild_edges(store: Store, changed: dict[str, FileInfo], removed: list[str
         targets = resolve_imports(fi, mods, path_set)
         imports[fi.path] = targets
         import_rows.extend({"a": fi.path, "b": t} for t in targets)
-    store.q("UNWIND $rows AS r MATCH (a:File {path: r.a}), (b:File {path: r.b}) MERGE (a)-[:IMPORTS]->(b)",
-            rows=import_rows)
+    _batched(store, "UNWIND $rows AS r MATCH (a:File {path: r.a}), (b:File {path: r.b}) MERGE (a)-[:IMPORTS]->(b)",
+             import_rows)
 
     index: dict[str, list[tuple[str, str, str]]] = {}
     for r in store.q("MATCH (s:Symbol) WHERE s.deleted = false "
@@ -309,8 +352,8 @@ def _rebuild_edges(store: Store, changed: dict[str, FileInfo], removed: list[str
                         break
                 if pick:
                     call_rows.append({"a": s.key, "b": pick[0]})
-    store.q("UNWIND $rows AS r MATCH (a:Symbol {key: r.a}), (b:Symbol {key: r.b}) MERGE (a)-[:CALLS]->(b)",
-            rows=call_rows)
+    _batched(store, "UNWIND $rows AS r MATCH (a:Symbol {key: r.a}), (b:Symbol {key: r.b}) MERGE (a)-[:CALLS]->(b)",
+             call_rows)
 
 
 # --------------------------------------------------------------------------- #

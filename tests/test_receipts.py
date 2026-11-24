@@ -77,6 +77,49 @@ def test_quote_matching_respects_token_boundaries():
     assert find_quote("x   =   1", "x = 1") == 1
 
 
+# --------------------------------------------------------------------------- scale & portability
+
+
+def test_tiny_batches_give_identical_results(shop, monkeypatch):
+    """Large repos are written in committed batches; batching must not change any outcome."""
+    import receipts.graph as graph
+    monkeypatch.setattr(graph, "BATCH", 3)
+    repo, store = shop
+    remember_day1(repo, store)
+    apply_v2(repo)
+    with Store(store) as s:
+        sync(s, repo)
+    assert statuses(store) == {"M1": "stale", "M2": "suspect", "M3": "stale", "M4": "suspect", "M5": "stale",
+                               "M6": "stale", "M7": "fresh", "M8": "fresh"}
+
+
+def test_touching_a_file_is_not_a_change(shop):
+    import os
+    repo, store = shop
+    os.utime(repo / "tinyshop" / "money.py", None)  # new mtime, same content
+    with Store(store) as s:
+        report = sync(s, repo)
+    assert report.sync_id is None and report.files_changed == []
+
+
+def test_windows_lock_fallback(tmp_path, monkeypatch):
+    import receipts.store as st
+
+    class FakeMsvcrt:
+        LK_NBLCK, LK_UNLCK = 2, 0
+        calls = []
+
+        @classmethod
+        def locking(cls, fd, mode, n):
+            cls.calls.append(mode)
+
+    monkeypatch.setattr(st, "fcntl", None)
+    monkeypatch.setattr(st, "msvcrt", FakeMsvcrt)
+    with Store(tmp_path / "w.rl") as s:
+        s.q("CREATE (:X)")
+    assert FakeMsvcrt.calls == [FakeMsvcrt.LK_NBLCK, FakeMsvcrt.LK_UNLCK]
+
+
 # --------------------------------------------------------------------------- memory
 
 

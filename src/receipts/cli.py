@@ -28,8 +28,21 @@ def parse_cite_arg(s: str):
     return s
 
 
+PACKAGE_SOURCE = os.environ.get("RECEIPTS_SOURCE", "git+https://github.com/karthik7271/receipts")
+EPHEMERAL_MARKERS = ("archive-v0", "/.cache/uv/", "\\uv\\cache\\", "/uv/cache/", "builds-v0")
+
+
 def receipts_command() -> list[str]:
+    """The command hooks and MCP hosts should run later.
+
+    Under `uvx` the current interpreter lives in uv's cache and can be cleaned
+    up at any time, so point hosts at `uvx --from <source> receipts` instead of
+    at this temporary path.
+    """
     exe = shutil.which("receipts")
+    here = exe or sys.executable
+    if any(m in here for m in EPHEMERAL_MARKERS) and shutil.which("uvx"):
+        return ["uvx", "--from", PACKAGE_SOURCE, "receipts"]
     if exe:
         return [os.path.abspath(exe)]
     return [sys.executable, "-m", "receipts"]

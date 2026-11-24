@@ -9,7 +9,6 @@ which is what makes this pattern viable.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import subprocess
 import time
@@ -19,7 +18,35 @@ from typing import Any
 
 import relate
 
+try:  # POSIX
+    import fcntl
+    msvcrt = None
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
+
 SCHEMA_VERSION = 1
+
+
+def _try_lock(fh, shared: bool) -> bool:
+    """Non-blocking file lock. Windows has no shared locks, so readers lock exclusively there."""
+    try:
+        if fcntl is not None:
+            fcntl.flock(fh, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+        else:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        return True
+    except (BlockingIOError, PermissionError, OSError):
+        return False
+
+
+def _unlock(fh) -> None:
+    if fcntl is not None:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+    else:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 SCHEMA = [
     "CREATE CONSTRAINT fact_id IF NOT EXISTS FOR (f:Fact) REQUIRE f.id IS UNIQUE",
@@ -115,23 +142,18 @@ class Store:
     def _acquire_lock(self) -> None:
         lock_path = self.path.with_name(self.path.name + ".lock")
         self._lock_fh = open(lock_path, "a+")
-        mode = fcntl.LOCK_SH if self.read_only else fcntl.LOCK_EX
         deadline = time.monotonic() + self.lock_timeout
-        while True:
-            try:
-                fcntl.flock(self._lock_fh, mode | fcntl.LOCK_NB)
-                return
-            except BlockingIOError:
-                if time.monotonic() > deadline:
-                    self._lock_fh.close()
-                    self._lock_fh = None
-                    raise StoreBusy(f"store is busy: {self.path}")
-                time.sleep(0.02)
+        while not _try_lock(self._lock_fh, self.read_only):
+            if time.monotonic() > deadline:
+                self._lock_fh.close()
+                self._lock_fh = None
+                raise StoreBusy(f"store is busy: {self.path}")
+            time.sleep(0.02)
 
     def _release_lock(self) -> None:
         if self._lock_fh is not None:
             try:
-                fcntl.flock(self._lock_fh, fcntl.LOCK_UN)
+                _unlock(self._lock_fh)
             finally:
                 self._lock_fh.close()
                 self._lock_fh = None
@@ -167,6 +189,13 @@ class Store:
         """
         if not self.read_only:
             self.db.commit()
+
+    def next_ids(self, counter: str, n: int) -> int:
+        """Reserve ``n`` consecutive numbers from a counter; returns the first."""
+        row = self.one(
+            f"MATCH (m:Meta {{key: 'receipts'}}) SET m.{counter} = coalesce(m.{counter}, 1) + $n "
+            f"RETURN m.{counter} - $n AS first", n=n)
+        return int(row["first"])
 
     def next_id(self, counter: str, prefix: str) -> str:
         row = self.one(
