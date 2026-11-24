@@ -76,6 +76,8 @@ def cmd_remember(a, p):
         f = memory.remember(s, a.repo, a.text, [parse_cite_arg(c) for c in a.cite], kind=a.kind,
                             derived_from=a.derived_from or [], tags=a.tag or [], author="user")
     print(fact_block(f, p, why=False))
+    for w in f.get("warnings") or []:
+        print(p("  tip: ", "33") + w)
     for r in f.get("related") or []:
         print(p.dim(f"  also cites the same code: {r['id']} [{r['status']}] {r['text']}"))
 

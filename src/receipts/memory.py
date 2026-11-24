@@ -73,7 +73,7 @@ def resolve_symbol(store: Store, name: str, path: str | None = None) -> list[dic
         "MATCH (s:Symbol) WHERE s.deleted = false AND (s.key = $n OR s.qualname = $n OR s.name = $n) "
         "AND ($path IS NULL OR s.path = $path OR s.path ENDS WITH $path) "
         "RETURN s.key AS key, s.qualname AS qualname, s.path AS path, s.kind AS kind, s.body_hash AS body_hash, "
-        "s.sig_hash AS sig_hash, s.source AS source, s.start AS start, s.signature AS signature "
+        "s.sig_hash AS sig_hash, s.source AS source, s.start AS start, s.end AS end, s.signature AS signature "
         "ORDER BY size(s.key)", n=name, path=path)
     exact = [r for r in rows if r["key"] == name]
     if exact:
@@ -101,7 +101,8 @@ def resolve_cite(store: Store, root: Path, raw: Any) -> Citation:
                                "Cite it as <path>::<name>.")
         m = matches[0]
         return Citation("symbol", m["key"], m["key"], hash=m["body_hash"], sig_hash=m["sig_hash"],
-                        snapshot=(m["source"] or "")[:SNAPSHOT_MAX], line=m["start"])
+                        snapshot=(m["source"] or "")[:SNAPSHOT_MAX], line=m["start"],
+                        extra={"kind": m["kind"], "lines": (m["end"] or m["start"] or 0) - (m["start"] or 0) + 1})
     if "path" in c:
         rel = _rel(root, str(c["path"]))
         text = read_text(root, rel)
@@ -185,14 +186,31 @@ def _create_fact(store: Store, root: Path, text: str, cites: list[Any], kind: st
     return fid, citations
 
 
+BROAD_CLASS_LINES = 25
+
+
+def citation_warnings(citations: list[Citation]) -> list[str]:
+    """Receipts that will flag the memory on unrelated edits: suggest a narrower one."""
+    out = []
+    for c in citations:
+        if c.mode == "symbol" and c.extra.get("kind") == "class" and c.extra.get("lines", 0) > BROAD_CLASS_LINES:
+            out.append(f"{c.label} is a whole class ({c.extra['lines']} lines): any edit to it will flag this memory. "
+                       "If the claim is about one method or attribute, cite that instead (Class.method).")
+        elif c.mode == "file":
+            out.append(f"{c.label} is a whole file: any edit to it will flag this memory. Cite the symbol, or quote "
+                       "the exact line, that proves the claim.")
+    return out
+
+
 def remember(store: Store, root: Path, text: str, cites: list[Any], *, kind: str = "fact",
              derived_from: list[str] | None = None, tags: list[str] | None = None,
              author: str = "agent", session: str | None = None) -> dict:
     _sync_for(store, root, cites)
-    fid, _ = _create_fact(store, root, text, cites, kind, derived_from or [], tags or [], author, session)
+    fid, citations = _create_fact(store, root, text, cites, kind, derived_from or [], tags or [], author, session)
     recompute_status(store)
     out = get_fact(store, fid)
     out["related"] = _related_existing(store, fid)
+    out["warnings"] = citation_warnings(citations)
     return out
 
 

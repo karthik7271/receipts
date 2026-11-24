@@ -62,8 +62,9 @@ TOOLS = [
         "description": (
             "Save a durable fact about this codebase for future sessions (invariant, convention, gotcha, "
             "decision, how-to). Every memory needs receipts: cite the code that proves it so future sessions are "
-            "told when that code changes. Use derived_from when the conclusion builds on other memories. Skip "
-            "trivia that is obvious from one read of one file."),
+            "told when that code changes. Cite the narrowest code that proves the claim (a method rather than its "
+            "whole class, an exact quoted line rather than a file). Use derived_from when the conclusion builds on "
+            "other memories. Skip trivia that is obvious from one read of one file."),
         "inputSchema": {"type": "object", "required": ["text", "cites"], "properties": {
             "text": {"type": "string", "description": "One self-contained claim, specific enough to be wrong"},
             "cites": {"type": "array", "minItems": 1, "items": CITE_SCHEMA},
@@ -144,6 +145,8 @@ class Server:
                                     kind=args.get("kind") or "fact", derived_from=args.get("derived_from") or [],
                                     tags=args.get("tags") or [], author="agent")
                 out = "Remembered.\n" + fact_block(f, self.p, why=False)
+                for w in f.get("warnings") or []:
+                    out += f"\nTip: {w}"
                 if f.get("related"):
                     out += "\n\nOther memories cite the same code; make sure they don't overlap or contradict it:\n"
                     out += "\n".join(f"  {r['id']} [{r['status']}] {r['text']}" for r in f["related"])

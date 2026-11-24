@@ -165,6 +165,15 @@ def test_memories_need_real_receipts(shop):
             memory.remember(s, repo, "claim", [{"path": "config/settings.yaml", "quote": "tax_rate: 0.5"}])
 
 
+def test_broad_receipts_get_a_tip(shop):
+    repo, store = shop
+    with Store(store) as s:
+        broad = memory.remember(s, repo, "Settings live in YAML.", ["config/settings.yaml"])
+        narrow = memory.remember(s, repo, "Tax is 8%.", [{"path": "config/settings.yaml", "quote": "tax_rate: 0.08"}])
+    assert broad["warnings"] and "whole file" in broad["warnings"][0]
+    assert narrow["warnings"] == []
+
+
 def test_refactor_propagates_through_the_graph(shop):
     repo, store = shop
     remember_day1(repo, store)
