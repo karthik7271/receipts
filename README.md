@@ -85,12 +85,19 @@ on an unchanged repo takes about 1 s, and each hook after an edit about 0.1 s.
 | Repair with history | manual edits | overwrite | `verify`, `revise`, `reaffirm`, `retract` |
 | Runs where the agent runs | a file | usually a service | an embedded `.rl` file, no server |
 
-## Why Relate
+## How it uses Relate
+
+**Mode: single file.** Each repository's memory is one Relate store, `.receipts/memory.rl`. Memory has to outlive
+every agent session, so the store is durable on disk. Hooks and MCP calls open that one file in milliseconds with no
+server, and a team can commit it to share memory alongside the code. The persistent stores to inspect are
+`examples/tinyshop/.receipts/memory.rl`, `examples/live-flask/.receipts/memory.rl` and
+`examples/live-claude-code/tinyshop/.receipts/memory.rl`. (The browser viewer replays an export of a store into an
+in-memory Relate, which is all a read-only view needs.)
 
 - **Embedded and in-process.** Every hook, MCP call and CLI command opens the store, runs one transaction and closes
   it. That's why it can run after every tool call: no server to start, no account.
-- **One `.rl` file per repository** (`.receipts/memory.rl`). Commit it and the team shares one memory, re-checked
-  against whatever each person has checked out.
+- **One `.rl` file per repository.** Commit it and the team shares one memory, re-checked against whatever each
+  person has checked out.
 - **Cypher with modern path patterns.** Staleness is three queries using quantified path patterns (`->+`,
   `->{1,2}`) and `EXISTS {}` subqueries. `recall` combines Relate's full-text index with graph expansion over
   `CALLS`, `IMPORTS` and `DERIVED_FROM`.
